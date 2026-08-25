@@ -1,4 +1,6 @@
 package bank;
+import java.util.List;
+import java.util.Scanner;
 
  //base type for everyone who can log in. 
 public abstract class User 
@@ -43,6 +45,9 @@ public abstract class User
     {
         this.password = password;
     }
+
+    //each class implements its own dashboard, since the options are different for each role
+    public abstract void dashboard(Scanner in, List<User> users, List<Account> accounts);
 
     //override for better fromatting
     @Override

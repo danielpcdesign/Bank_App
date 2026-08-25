@@ -2,6 +2,7 @@
 CLAUDE.md
 AGENTS.md
 .claude/
+PHASE2-PLAN.md
 
 # Build output (javac -d out)
 out/

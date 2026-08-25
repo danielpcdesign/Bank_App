@@ -15,57 +15,201 @@ public class Main
     {
         Scanner in = new Scanner(System.in);
 
-        Customer daniel = new Customer("daniel", "pw1234", "Daniel Palencia");
+        List <User> users = new ArrayList<>();
+        Customer daniel = new Customer("daniel", "1234", "Daniel Palencia");
+        User admin = new Admin("admin", "admin", "Admin User");
+        users.add(daniel);
+        users.add(admin);
 
         // typed as Account, not SavingsAccount, so the menu never knows which kind it holds
         List<Account> accounts = new ArrayList<>();
         accounts.add(new SavingsAccount("SAV-001", daniel, SEED_BALANCE));
+        accounts.add(new CheckingAccount("CHK-001", daniel, SEED_BALANCE));
 
         printMessage("welcome to the bank");
-        printMessage("signed in as " + daniel);
-        printBalances(accounts);
+        printMessage("please sign in with your username and password");
+        System.out.print("username: ");
+        String username = in.nextLine().trim();
+        System.out.print("password: ");
+        String password = in.nextLine().trim();
+        User user = null;
+        List<Account> userAccounts = new ArrayList<>();
 
+        for (User u : users)
+        {
+            if (u.getUsername().equals(username))
+            {
+                if (u.checkPassword(password))
+                {
+                    user = u;
+                    //loop through all accounts and add them to user list
+                    for (Account acct : accounts)
+                    {
+                        if (acct.getOwner().getUsername().equals(username))
+                        {
+                            userAccounts.add(acct);
+                        }
+                    }
+                    break; // user found and authenticated. accounts added. exit loop
+                }
+            }
+        }
+
+        if (user == null)
+        {
+            printMessage("invalid credentials");
+            return;
+        }
+        
         boolean running = true;
-
+        printMessage("signed in as " + user.getUsername());
+        //main application loop, menu driven for testing. the real app is event driven
         while (running)
         {
-            printMenu();
+            printMenu(user.getRole());
             String choice = in.nextLine().trim();
 
-            switch (choice)
+            switch (user.getRole())
             {
-                case "1":
-                    printBalances(accounts);
-                    break;
+                case "Admin":
+                    switch (choice)
+                    {
+                    case "1":
+                        ((Admin) user).viewAllAccounts(accounts);
+                        break;
 
-                case "2":
-                    doDeposit(in, accounts);
-                    break;
+                    case "2":
+                        ((Admin) user).viewAllCustomers((List<Customer>) (List<?>) users);
+                        break;
 
-                case "3":
-                    doWithdraw(in, accounts);
-                    break;
+                    case "3":
+                        System.out.print("username: ");
+                        String newUsername = in.nextLine().trim();
+                        System.out.print("password: ");
+                        String newPassword = in.nextLine().trim();
+                        System.out.print("full name: ");
+                        String newFullName = in.nextLine().trim();
+                        ((Admin) user).createCustomer((List<Customer>) (List<?>) users, newUsername, newPassword, newFullName);
+                        break;
 
-                case EXIT_KEY:
-                    running = false;
-                    break;
+                    case "4":
+                        System.out.print("username: ");
+                        String delUsername = in.nextLine().trim();
+                        ((Admin) user).deleteCustomer((List<Customer>) (List<?>) users, delUsername);
+                        break;
 
-                default:
-                    printMessage("unknown option");
+                    case "5":
+                        System.out.print("account id: ");
+                        String acctId = in.nextLine().trim();
+                        System.out.print("owner username: ");
+                        String ownerUsername = in.nextLine().trim();
+                        Customer owner = null;
+                        for (User u : users)
+                        {
+                            if (u instanceof Customer && u.getUsername().equals(ownerUsername))
+                            {
+                                owner = (Customer) u;
+                                break;
+                            }
+                        }
+                        if (owner == null)
+                        {
+                            printMessage("no such customer");
+                            break;
+                        }
+                        
+                        System.out.print("initial balance: ");
+                        double balance = Double.parseDouble(in.nextLine().trim());
+                        
+                        System.out.print("account type (savings/checking): ");
+                        String accountType = in.nextLine().trim();
+                        
+                        ((Admin) user).createAccount(accounts, acctId, owner, balance, accountType);
+                        break;
+                    
+                    case "6":
+                        System.out.print("account id: ");
+                        String delAcctId = in.nextLine().trim();
+                        ((Admin) user).deleteAccount(accounts, delAcctId);
+                        break;
+
+                    case "7":
+                        System.out.print("username: ");
+                        String editUsername = in.nextLine().trim();
+                        System.out.print("new password: ");
+                        String editPassword = in.nextLine().trim();
+                        System.out.print("new full name: ");
+                        String editFullName = in.nextLine().trim();
+                        ((Admin) user).editCustomer((List<Customer>) (List<?>) users, editUsername, editPassword, editFullName);
+                        break;
+
+                    case EXIT_KEY:
+                        running = false;
+                        break;
+                        
+                    default:
+                        printMessage("unknown option");
+                        break; 
+                    }
+                case "Customer":
+                    switch (choice)
+                    {
+                    case "1":
+                        printBalances(userAccounts);
+                        break;
+
+                    case "2":
+                        doDeposit(in, userAccounts);
+                        break;
+
+                    case "3":
+                        doWithdraw(in, userAccounts);
+                        break;
+
+                    case EXIT_KEY:
+                        running = false;
+                        break;
+
+                    default:
+                        printMessage("unknown option");
+                        break; 
+                    }
+                break;
             }
+            
         }
 
         printMessage("goodbye");
         in.close();
     }
 
-    private static void printMenu()
+    private static void printMenu(String customerType)
     {
-        printMessage("");
-        printMessage("1) show balances");
-        printMessage("2) deposit");
-        printMessage("3) withdraw");
-        printMessage(EXIT_KEY + ") quit");
+        switch (customerType) {
+        //admin menu
+            case "Admin":
+                printMessage("");
+                printMessage("1) view all accounts");
+                printMessage("2) view all customers");
+                printMessage("3) create customer");
+                printMessage("4) delete customer");
+                printMessage("5) create account");
+                printMessage("6) delete account");
+                printMessage("7) edit customer");
+                printMessage(EXIT_KEY + ") quit");
+                break;
+        //regular customer menu
+            case "Customer":
+                printMessage("");
+                printMessage("1) show balances");
+                printMessage("2) deposit");
+                printMessage("3) withdraw");
+                printMessage(EXIT_KEY + ") quit");
+                break;
+            default:
+                printMessage("Unknown customer type.");
+                break;
+        }
         System.out.print("choice: ");
     }
 
@@ -73,7 +217,7 @@ public class Main
     {
         for (Account acct : accounts)
         {
-            printMessage("  " + acct);
+            printMessage("  " + acct.getBalance());
         }
     }
 
@@ -111,10 +255,13 @@ public class Main
         printMessage("  " + acct);
     }
 
+    //-------------------------------------Helper methods below, not part of the menu loop-------------------------------------
+
     private static Account pickAcct(Scanner in, List<Account> accounts)
     {
         if (accounts.size() == 1)
         {
+            //early return for one account
             return accounts.get(0);
         }
 
@@ -134,7 +281,7 @@ public class Main
         return null;
     }
 
-    // bad input becomes 0, which the account rules already refuse. no crash, no extra branch
+    // bad input becomes 0
     private static double readAmt(Scanner in)
     {
         System.out.print("amount: ");
@@ -151,6 +298,7 @@ public class Main
         }
     }
 
+    // centralized output method, change formatting here
     private static void printMessage(String message)
     {
         System.out.println(message);

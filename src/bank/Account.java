@@ -6,7 +6,7 @@ public abstract class Account implements AccountOperations
     private final String acctId;
     private final Customer owner;
     private double balance;
-    protected double Limit;
+    protected double limit;
 
     public Account(String acctId, Customer owner, double balance)
     {

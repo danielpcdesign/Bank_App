@@ -2,7 +2,7 @@ package com.bank.model;
 
 public class Customer
 {
-    private int id;
+    private Integer id;
     private String username;
     private String fullName;
 
@@ -11,7 +11,7 @@ public class Customer
 
     }
 
-    public Customer(int id, String username, String fullName)
+    public Customer(Integer id, String username, String fullName)
     {
         this.id = id;
         this.username = username;
@@ -20,7 +20,7 @@ public class Customer
 
     //----------------------------------------------------------------GETTERS----------------------------------------------------------------
 
-    public int getId()
+    public Integer getId()
     {
         return id;
     }

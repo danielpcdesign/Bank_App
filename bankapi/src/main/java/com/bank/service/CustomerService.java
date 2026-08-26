@@ -25,17 +25,35 @@ public class CustomerService
 
     public Optional<Customer> getCustomerById(int id)
     {
-        return customerRepository.findByID(id);
+        return customerRepository.findById(id);
     }
 
-    public void addNewCustomer(Customer customer)
+    public boolean addNewCustomer(Customer customer)
     {
+        if (customerRepository.findById(customer.getId()).isPresent())
+        {
+            return false; // customer with this id already exists
+        }
         customerRepository.addCustomer(customer);
+        return true;
     }
 
     public boolean deleteCustomerById(int id)
     {
         return customerRepository.deleteById(id);
 
+    }
+
+    public Optional<Customer> editCustomer(int id, Customer data)
+    {
+        if (data.getId() != id)
+        {
+            return Optional.empty(); // id mismatch
+        }
+        if (!customerRepository.findById(id).isPresent())
+        {
+            return Optional.empty(); // customer not found
+        }
+        return customerRepository.editCustomer(id, data);
     }
 }

@@ -1,10 +1,14 @@
 package com.bank.controller;
+import java.net.URI;
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,8 +40,8 @@ public class CustomerController
     public ResponseEntity<Customer> getCustomerById(@PathVariable int id)
     {   
         return customerService.getCustomerById(id)
-            .map(ResponseEntity::ok)
-            .orElseGet(() -> ResponseEntity.notFound().build());
+            .map(ResponseEntity::ok) //200
+            .orElseGet(() -> ResponseEntity.notFound().build()); //404
     }
 
     @DeleteMapping("/customers/{id}")
@@ -57,7 +61,28 @@ public class CustomerController
     @PostMapping("/customers")
     public ResponseEntity<Customer> addCustomer(@RequestBody Customer customer)
     {
-        customerService.addNewCustomer(customer);
-        return ResponseEntity.ok(customer);
+        if (customer.getId() == null)
+        {
+            return ResponseEntity.badRequest().build(); //400
+        }
+
+        if(!customerService.addNewCustomer(customer))
+        {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build(); //409 
+        }
+        return ResponseEntity.created(URI.create("/api/v1/customers/" + customer.getId())).body(customer); //201 created
+    }
+
+    @PutMapping("/customers/{id}")
+    public ResponseEntity<Customer> editCustomer(@PathVariable int id, @RequestBody Customer customer)
+    {
+        if (customer.getId() == null || customer.getId() != id)
+        {
+            return ResponseEntity.badRequest().build(); //400 body is not valid or id mismatch
+        }
+
+        return customerService.editCustomer(id, customer)
+            .map(ResponseEntity::ok) //200
+            .orElseGet(() -> ResponseEntity.notFound().build()); //404
     }
 }

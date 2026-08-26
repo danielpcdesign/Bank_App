@@ -1,0 +1,8 @@
+# Agent instruction files — local guidance, not part of the project
+CLAUDE.md
+AGENTS.md
+.claude/
+PHASE2-PLAN.md
+
+# Build output (javac -d out)
+out/

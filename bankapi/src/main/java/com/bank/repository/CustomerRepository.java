@@ -1,66 +1,85 @@
 package com.bank.repository;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
 import com.bank.model.Customer;
 
-// stands in for the database
+// same five methods as before. the storage behind them is now atlas, not a map.
+// nothing else changes
 @Repository
 public class CustomerRepository
 {
-    // keyed by id, the way every lookup here asks for it. linked to keep seed order 
-    private final Map<Integer, Customer> customers = new LinkedHashMap<>();
+    private final CustomerMongoRepository mongo;
 
-    // ids are assigned by hand, no generation
-    public CustomerRepository()
+    public CustomerRepository(CustomerMongoRepository mongo)
     {
-        seed(new Customer(1, "daniel", "Daniel Palencia"));
-        seed(new Customer(2, "emily", "Emily Romero"));
-        seed(new Customer(3, "marcus", "Marcus Webb"));
+        this.mongo = mongo;
+        seedIfEmpty();
     }
 
-    private void seed(Customer customer)
+    // only write the three seed customers when the collection is empty.
+    private void seedIfEmpty()
     {
-        customers.put(customer.getId(), customer);
+        if (mongo.count() == 0)
+        {
+            mongo.save(new Customer(1, "alice", "Alice Smith"));
+            mongo.save(new Customer(2, "bob", "Bob Jones"));
+            mongo.save(new Customer(3, "carol", "Carol Johnson"));
+        }
     }
 
-    // fresh list per call
+    // findAll already builds a fresh list, so no defensive copy is needed here
     public List<Customer> getCustomers()
     {
-        return new ArrayList<>(customers.values());
+        return mongo.findAll();
     }
 
+    // int autoboxes to the Integer the interface was declared with
     public Optional<Customer> findById(int id)
     {
-        return Optional.ofNullable(customers.get(id));
+        return mongo.findById(id);
     }
 
-    public void addCustomer(Customer customer)
+    //catch duplicate and return empty optional, otherwise return the saved customer in an optional.
+    public Optional<Customer> addCustomer(Customer customer)
     {
-        customers.put(customer.getId(), customer);
+        Optional<Customer> result; 
+        try
+        {
+            result = Optional.of(mongo.insert(customer));
+        }
+        catch (DuplicateKeyException e)
+        {
+            System.out.println("customer already exists, not adding: " + customer.getId());
+            return Optional.empty();
+        }
+        return result;
     }
 
-    // remove returns the old value, or null when the key was absent
+    // deleteById returns void, so we have to check for existence first to know if it was deleted or not.
     public boolean deleteById(int id)
     {
-        return customers.remove(id) != null;
+        if (!mongo.existsById(id))
+        {
+            return false;
+        }
+
+        mongo.deleteById(id);
+        return true;
     }
 
-    // full replacement. scales better if another field is added. 
+    // empty Optional when no document has that id.
+    // otherwise build the replacement from data using path as key
     public Optional<Customer> editCustomer(int id, Customer data)
     {
-        if (!customers.containsKey(id))
+        if(!mongo.existsById(data.getId()))
         {
             return Optional.empty();
         }
-
-        customers.put(id, data); // replace the old customer with the new one
-        return Optional.of(data);
+        return Optional.of(mongo.save(new Customer(id, data.getUsername(), data.getFullName())));
     }
 }

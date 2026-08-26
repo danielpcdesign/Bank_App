@@ -54,7 +54,6 @@ public class CustomerRepository
         }
         catch (DuplicateKeyException e)
         {
-            System.out.println("customer already exists, not adding: " + customer.getId());
             return Optional.empty();
         }
         return result;
@@ -76,7 +75,7 @@ public class CustomerRepository
     // otherwise build the replacement from data using path as key
     public Optional<Customer> editCustomer(int id, Customer data)
     {
-        if(!mongo.existsById(data.getId()))
+        if(!mongo.existsById(id)) //ensure entry exists. save will overwrite if it does. implicitly force agreement between path and body id
         {
             return Optional.empty();
         }

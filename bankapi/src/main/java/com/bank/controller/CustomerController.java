@@ -1,6 +1,7 @@
 package com.bank.controller;
 import java.net.URI;
 import java.util.List;
+import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.bank.model.Customer;
 import com.bank.service.CustomerService;
+
+import jakarta.validation.Valid;
 
 // translates http to java and back. no business rules live here
 @RestController
@@ -59,13 +62,13 @@ public class CustomerController
     }
 
     @PostMapping("/customers")
-    public ResponseEntity<Customer> addCustomer(@RequestBody Customer customer)
+    public ResponseEntity<Customer> addCustomer(@Valid @RequestBody Customer customer)
     {
         if (customer.getId() == null)
         {
-            return ResponseEntity.badRequest().build(); //400
-        }
-
+        return ResponseEntity.badRequest().build(); //400
+        } //redundant but keeping it (@NotNull in model)
+            
         if(!customerService.addNewCustomer(customer))
         {
             return ResponseEntity.status(HttpStatus.CONFLICT).build(); //409 
@@ -74,11 +77,11 @@ public class CustomerController
     }
 
     @PutMapping("/customers/{id}")
-    public ResponseEntity<Customer> editCustomer(@PathVariable int id, @RequestBody Customer customer)
+    public ResponseEntity<Customer> editCustomer(@PathVariable int id, @Valid @RequestBody Customer customer)
     {
-        if (customer.getId() == null || customer.getId() != id)
-        {
-            return ResponseEntity.badRequest().build(); //400 body is not valid or id mismatch
+        if (!Objects.equals(customer.getId(), id))
+        {       
+            return ResponseEntity.badRequest().build(); //mismatch between path and body. 400
         }
 
         return customerService.editCustomer(id, customer)

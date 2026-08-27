@@ -10,9 +10,10 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 |---|---|---|
 | 1 | Console app — OOD, collections, SOLID | Complete |
 | 2 | REST API — Spring Boot, layered architecture, MongoDB Atlas | Complete |
-| 3 | TDD — JUnit + Mockito at all three layers | In progress |
-| 4–5 | Postman collection, Swagger / OpenAPI | Planned |
-| 8 | React front end | Planned |
+| 3 | TDD — JUnit + Mockito at all three layers | Complete — 27 tests, no network |
+| 4 | API testing — Postman collection | Complete — 18 requests, 27 assertions |
+| 5 | API docs — Swagger / OpenAPI | Complete |
+| 8 | React front end | Next |
 | 9–14 | CI/CD, security, cloud, IaC, observability, microservices | Planned |
 
 ## Prerequisites
@@ -113,6 +114,19 @@ Base URL: `http://localhost:8080/api/v1`
 Ids are assigned by hand, not generated. `409` rather than `400` on a duplicate is deliberate: the failure is state-dependent, since the same request would have succeeded before that id existed and will succeed again after it is deleted.
 
 Validation errors return the status and path but **do not name the offending field**, to avoid handing out free reconnaissance. `server.error.include-binding-errors` is left at its default of `never`.
+
+### 4. API documentation
+
+With the app running:
+
+- **Interactive UI** — <http://localhost:8080/swagger-ui.html>. Fire requests at the API from the browser, with the request and response shapes filled in.
+- **Raw OpenAPI 3.1 spec** — <http://localhost:8080/v3/api-docs>.
+
+Every handler declares its real status codes via `@ApiResponses`. That is load-bearing rather than decorative: springdoc infers the response *shape* from a method's return type but cannot infer its *status*, so an unannotated `ResponseEntity<Void>` publishes `200` for a method that returns `204`. Left undocumented, the spec doesn't go blank — it goes wrong.
+
+The Bean Validation constraints on `Customer` appear in the generated schema automatically (`@NotNull` → `required`, `@NotBlank` → `minLength: 1`), so the constraints the server enforces are also the constraints the spec advertises.
+
+> `springdoc-openapi` has **no Spring Boot 4 release**. Version 2.8.6 targets Boot 3 and was verified working against 4.1.1 by hand. Its version is pinned explicitly in `pom.xml` because Boot's BOM does not manage third-party artifacts. One known gap: `@Positive` is not reflected in the schema.
 
 ## Testing
 

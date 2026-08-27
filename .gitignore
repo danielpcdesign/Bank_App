@@ -13,3 +13,4 @@ out/
 # json goes stale, and newman then tests requests nobody is using.
 /postman/
 .postman/
+PHASE3-PLAN.md

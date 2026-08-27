@@ -10,8 +10,10 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 |---|---|---|
 | 1 | Console app — OOD, collections, SOLID | Complete |
 | 2 | REST API — Spring Boot, layered architecture, MongoDB Atlas | Complete |
-| 3 | TDD — JUnit + Mockito at all three layers | Next |
-| 4–14 | API docs, Postgres/JPA, React, CI/CD, security, cloud, IaC, observability, microservices | Planned |
+| 3 | TDD — JUnit + Mockito at all three layers | In progress |
+| 4–5 | Postman collection, Swagger / OpenAPI | Planned |
+| 8 | React front end | Planned |
+| 9–14 | CI/CD, security, cloud, IaC, observability, microservices | Planned |
 
 ## Prerequisites
 
@@ -137,7 +139,7 @@ Each layer talks only to the one below it. The controller never touches the repo
 
 `CustomerRepository` **wraps** a Spring Data `MongoRepository` rather than being replaced by one. That costs an extra class of mostly delegation, and buys two things: the service keeps speaking the application's vocabulary instead of Spring Data's, and `MongoRepository`'s two dozen other methods — `deleteAll()` among them — stay out of reach of business logic.
 
-The payoff is measurable. Storage moved from an in-memory `LinkedHashMap` to a replica set in Atlas, and `CustomerService` and `CustomerController` did not change by a single line. Phase 6 swaps in Postgres the same way.
+The payoff is measurable. Storage moved from an in-memory `LinkedHashMap` to a replica set in Atlas, and `CustomerService` and `CustomerController` did not change by a single line — verifiable with `git diff`.
 
 Responsibilities are split so that each check lives in the only layer that can make it:
 
@@ -152,8 +154,10 @@ Feature branches over a chain of long-lived stage branches, each cut from the ti
 
 ```
 api-backend  ──►  database  ──►  frontend  ──►  deployed
-  (ph 2–5)        (ph 6–7)        (ph 8)      (ph 9, 11–12)
+   (ph 2)        (ph 4.5, 3–5)      (ph 8)     (ph 9, 11–12)
 ```
+
+`api-backend` ends where the API works against a hardcoded in-memory repository — that stub is what proves the layering. `database` is where storage becomes real (MongoDB Atlas) and gets proven, which is why the testing and documentation phases live there rather than with the API.
 
 `main` tracks the newest **completed** stage, so it always runs. Active work never happens on it directly. Fixes merge **forward only** — a change made on an earlier stage branch is merged into the later one, never cherry-picked backward.
 
@@ -167,8 +171,8 @@ api-backend  ──►  database  ──►  frontend  ──►  deployed
 | 3 | TDD | JUnit, Mockito, tests at all three layers |
 | 4 | API testing | Postman collections |
 | 5 | API docs | Swagger / OpenAPI |
-| 6 | Databases | Postgres + MongoDB, SQL, data modelling |
-| 7 | ORM | JPA / Hibernate |
+| ~~6~~ | ~~Databases~~ | Cut — Postgres/SQL dropped for time. MongoDB Atlas is the only store. |
+| ~~7~~ | ~~ORM~~ | Cut with Phase 6 — JPA maps relational tables, of which there are none. |
 | 8 | Frontend | React — components, props, routing, hooks |
 | 9 | DevOps | CI/CD, GitHub Actions, Docker, Kubernetes |
 | 10 | Security | Hashing, salting, BCrypt, AuthN/AuthZ, JWT |

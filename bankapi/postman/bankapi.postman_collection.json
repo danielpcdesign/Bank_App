@@ -1,0 +1,382 @@
+{
+  "info": {
+    "name": "Bank API - Phase 2",
+    "description": "Customer CRUD against the Spring Boot API backed by MongoDB Atlas. Run the folders in order: the happy path creates customer 4 and deletes it again, so the collection is repeatable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/api/v1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1 - happy path",
+      "item": [
+        {
+          "name": "GET all customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('returns a JSON array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('seeded customers are present', () => pm.expect(pm.response.json().length).to.be.at.least(3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET customer by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/2", "host": ["{{baseUrl}}"], "path": ["customers", "2"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('body id matches the path', () => pm.expect(pm.response.json().id).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST create customer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 4,\n  \"username\": \"nina\",\n  \"fullName\": \"Nina Cortez\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Location header points at the new resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/customers/4');",
+                  "});",
+                  "pm.test('echoes the created customer', () => pm.expect(pm.response.json().username).to.eql('nina'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the created customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('persisted correctly', () => pm.expect(pm.response.json().fullName).to.eql('Nina Cortez'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT replace customer",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 4,\n  \"username\": \"nina\",\n  \"fullName\": \"Nina C. Ortez\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('field was replaced', () => pm.expect(pm.response.json().fullName).to.eql('Nina C. Ortez'));",
+                  "pm.test('id is unchanged', () => pm.expect(pm.response.json().id).to.eql(4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));",
+                  "pm.test('body is empty', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the deleted customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('404 Not Found', () => pm.response.to.have.status(404));"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 - not found (404)",
+      "item": [
+        {
+          "name": "GET missing id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/99", "host": ["{{baseUrl}}"], "path": ["customers", "99"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('404', () => pm.response.to.have.status(404));"] }
+            }
+          ]
+        },
+        {
+          "name": "DELETE missing id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/99", "host": ["{{baseUrl}}"], "path": ["customers", "99"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('404', () => pm.response.to.have.status(404));"] }
+            }
+          ]
+        },
+        {
+          "name": "PUT missing id",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 99,\n  \"username\": \"ghost\",\n  \"fullName\": \"Ghost User\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/customers/99", "host": ["{{baseUrl}}"], "path": ["customers", "99"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404, not 201 - PUT does not create', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 - conflict (409)",
+      "item": [
+        {
+          "name": "POST duplicate id",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1,\n  \"username\": \"dupe\",\n  \"fullName\": \"Duplicate Id\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409, not 400 - the failure is state-dependent', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 - validation (400)",
+      "item": [
+        {
+          "name": "POST no id",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"noid\",\n  \"fullName\": \"No Id\"\n}" },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('400 - @NotNull on id', () => pm.response.to.have.status(400));"] }
+            }
+          ]
+        },
+        {
+          "name": "POST empty username",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"id\": 6,\n  \"username\": \"\",\n  \"fullName\": \"Six\"\n}" },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('400 - @NotBlank rejects empty', () => pm.response.to.have.status(400));"] }
+            }
+          ]
+        },
+        {
+          "name": "POST whitespace fullName",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"id\": 6,\n  \"username\": \"six\",\n  \"fullName\": \"   \"\n}" },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @NotBlank rejects whitespace, @NotNull would not', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST id zero",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"id\": 0,\n  \"username\": \"six\",\n  \"fullName\": \"Six Sixon\"\n}" },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('400 - @Positive on id', () => pm.response.to.have.status(400));"] }
+            }
+          ]
+        },
+        {
+          "name": "PUT body id does not match path id",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"id\": 5,\n  \"username\": \"bob\",\n  \"fullName\": \"Bob Jones\"\n}" },
+            "url": { "raw": "{{baseUrl}}/customers/2", "host": ["{{baseUrl}}"], "path": ["customers", "2"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - hand-rolled check, no annotation can see two inputs', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET non-numeric id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/customers/abc", "host": ["{{baseUrl}}"], "path": ["customers", "abc"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('400 - @PathVariable type conversion, free', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT on the collection (405)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"id\": 1,\n  \"username\": \"x\",\n  \"fullName\": \"Y Z\"\n}" },
+            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('405 - routing table keys on verb + path', () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

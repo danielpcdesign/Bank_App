@@ -1,9 +1,24 @@
 package com.bank.model;
 
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+
+@Document(collection = "customers")
 public class Customer
 {
+    @Id
+    @NotNull
+    @Positive
     private Integer id;
+
+    @NotBlank
     private String username;
+    
+    @NotBlank
     private String fullName;
 
     public Customer()

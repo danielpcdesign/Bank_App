@@ -1,6 +1,7 @@
 package com.bank.service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
@@ -28,14 +29,12 @@ public class CustomerService
         return customerRepository.findById(id);
     }
 
+    // unique _id. 
+    // an empty Optional back
+    // means the insert was rejected as a duplicate
     public boolean addNewCustomer(Customer customer)
     {
-        if (customerRepository.findById(customer.getId()).isPresent())
-        {
-            return false; // customer with this id already exists
-        }
-        customerRepository.addCustomer(customer);
-        return true;
+        return customerRepository.addCustomer(customer).isPresent();
     }
 
     public boolean deleteCustomerById(int id)
@@ -46,14 +45,13 @@ public class CustomerService
 
     public Optional<Customer> editCustomer(int id, Customer data)
     {
-        if (data.getId() != id)
+        // Objects.equals, not !=, so a null body id is a mismatch rather than an NPE.
+        if (!Objects.equals(data.getId(), id))
         {
             return Optional.empty(); // id mismatch
         }
-        if (!customerRepository.findById(id).isPresent())
-        {
-            return Optional.empty(); // customer not found
-        }
+
+        // existence checked at repo level
         return customerRepository.editCustomer(id, data);
     }
 }

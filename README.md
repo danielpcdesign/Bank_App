@@ -13,13 +13,15 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 | 3 | TDD — JUnit + Mockito at all three layers | Complete — 27 tests, no network |
 | 4 | API testing — Postman collection | Complete — 18 requests, 27 assertions |
 | 5 | API docs — Swagger / OpenAPI | Complete |
-| 8 | React front end | Next |
-| 9–14 | CI/CD, security, cloud, IaC, observability, microservices | Planned |
+| 8 | React front end — Vite, react-router | Complete — full CRUD against the API |
+| 9 | DevOps — CI/CD, Docker, Kubernetes | Next |
+| 10–14 | Security, cloud, IaC, observability, microservices | Planned |
 
 ## Prerequisites
 
 - **JDK 25** (built against Eclipse Temurin 25.0.4). Phase 1 needs nothing else.
 - **MongoDB Atlas account** (the free M0 tier is sufficient) for Phase 2.
+- **Node.js 20+** (built against 24.17) for Phase 8.
 - Maven is *not* required — the Spring project ships the `mvnw` wrapper.
 
 ## Repository layout
@@ -27,17 +29,21 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 ```
 Banking_App/
 ├── src/bank/                 Phase 1 — console app, plain javac, no build tool
-└── bankapi/                  Phase 2 — Spring Boot REST API
-    ├── src/main/java/com/bank/
-    │   ├── model/            Customer — plain data, JSON and BSON mapping
-    │   ├── repository/       storage access, the only package that knows about MongoDB
-    │   ├── service/          business rules
-    │   └── controller/       HTTP translation only
-    ├── postman/              importable API collection with assertions
-    └── mvnw / mvnw.cmd       Maven wrapper
+├── bankapi/                  Phase 2 — Spring Boot REST API
+│   ├── src/main/java/com/bank/
+│   │   ├── model/            Customer — plain data, JSON and BSON mapping
+│   │   ├── repository/       storage access, the only package that knows about MongoDB
+│   │   ├── service/          business rules
+│   │   └── controller/       HTTP translation only
+│   ├── postman/              importable API collection with assertions
+│   └── mvnw / mvnw.cmd       Maven wrapper
+└── bankui/                   Phase 8 — React front end
+    ├── src/components/       pieces — CustomerList, CustomerRow, AddCustomerForm
+    ├── src/pages/            route destinations — EditCustomerPage
+    └── vite.config.js        dev server + /api proxy
 ```
 
-The two applications are independent, and neither build interferes with the other.
+The three applications are independent — `javac`, Maven and npm — and no build interferes with another.
 
 ---
 
@@ -128,6 +134,55 @@ The Bean Validation constraints on `Customer` appear in the generated schema aut
 
 > `springdoc-openapi` has **no Spring Boot 4 release**. Version 2.8.6 targets Boot 3 and was verified working against 4.1.1 by hand. Its version is pinned explicitly in `pom.xml` because Boot's BOM does not manage third-party artifacts. One known gap: `@Positive` is not reflected in the schema.
 
+---
+
+## Phase 8 — front end
+
+React 19.2 on Vite 8.2, plain JavaScript. It is a **separate application** from `bankapi`, with its own build and its own port — not bundled into Spring's `static/`.
+
+That is a deployment decision, not a stylistic one. Phase 9's pipeline targets independently deployable units, and bundling would mean a CSS change requires recompiling Java. The cost is that the two are genuinely different origins in production, so the API must send CORS headers for real. See the note at the end of this section.
+
+### 1. Run
+
+The API must already be running (see Phase 2). Then, in a second terminal:
+
+```bash
+cd bankui
+npm install       # first time only
+npm run dev
+```
+
+<http://localhost:5173> — create, edit and delete customers against the live database.
+
+### 2. What it does
+
+| Route | View |
+|---|---|
+| `/` | customer table, plus the create form |
+| `/customers/{id}/edit` | edit one customer's username and full name |
+| anything else | "No such page" — the client-side 404 |
+
+Every endpoint in the table above is reachable from the UI. The id field is editable when **creating** — ids are assigned by hand in this API — and is deliberately not editable when **editing**, because the path is the record's identity. Changing an id is not an edit; it is a delete plus a create, which the API already exposes separately.
+
+### 3. The dev proxy, and why it is temporary
+
+`vite.config.js` forwards `/api` to `localhost:8080`:
+
+```js
+server: { proxy: { '/api': 'http://localhost:8080' } }
+```
+
+The browser therefore only ever talks to `:5173`, and Vite relays to Spring server-side where the same-origin policy does not apply. This is a **development convenience, not the deployed topology**. Once the two are served separately the requests are genuinely cross-origin and the API has to allow them explicitly — configured in Phase 9, along with the other half of the same debt: `BrowserRouter` uses the History API, so a deep link to `/customers/2/edit` is a real `GET` for that path and the server must answer `index.html` rather than 404. Vite does both for free in development, which is exactly why they are easy to forget.
+
+### 4. Build
+
+```bash
+npm run build     # → bankui/dist
+npm run lint
+```
+
+---
+
 ## Testing
 
 Import `bankapi/postman/bankapi.postman_collection.json` into Postman and use **Run collection** — 18 requests, 27 assertions, covering the happy path plus every error status above.
@@ -143,13 +198,16 @@ The happy-path folder creates and then deletes a customer, so the collection is 
 ## Architecture
 
 ```
-client → controller → service → repository → MongoDB Atlas
-                                     ↑
-                          the only layer that knows
-                          which database is behind it
+bankui (React)  →  controller → service → repository → MongoDB Atlas
+   :5173             :8080                     ↑
+   ────────┬────────                the only layer that knows
+    HTTP, JSON, and                 which database is behind it
+    nothing else
 ```
 
 Each layer talks only to the one below it. The controller never touches the repository, and the repository never formats a response.
+
+The front end sits outside that chain entirely. Everything it knows about the server is five URLs and their status codes — the contract published at `/v3/api-docs`. It has no build-time dependency on the API and no shared code with it, which is what makes them separately deployable in Phase 9.
 
 `CustomerRepository` **wraps** a Spring Data `MongoRepository` rather than being replaced by one. That costs an extra class of mostly delegation, and buys two things: the service keeps speaking the application's vocabulary instead of Spring Data's, and `MongoRepository`'s two dozen other methods — `deleteAll()` among them — stay out of reach of business logic.
 
@@ -171,7 +229,7 @@ api-backend  ──►  database  ──►  frontend  ──►  deployed
    (ph 2)        (ph 4.5, 3–5)      (ph 8)     (ph 9, 11–12)
 ```
 
-`api-backend` ends where the API works against a hardcoded in-memory repository — that stub is what proves the layering. `database` is where storage becomes real (MongoDB Atlas) and gets proven, which is why the testing and documentation phases live there rather than with the API.
+`api-backend` ends where the API works against a hardcoded in-memory repository — that stub is what proves the layering. `database` is where storage becomes real (MongoDB Atlas) and gets proven, which is why the testing and documentation phases live there rather than with the API. `frontend` adds `bankui/` without changing a line of Java.
 
 `main` tracks the newest **completed** stage, so it always runs. Active work never happens on it directly. Fixes merge **forward only** — a change made on an earlier stage branch is merged into the later one, never cherry-picked backward.
 

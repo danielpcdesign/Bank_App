@@ -52,6 +52,39 @@ export default function CustomerList() {
       .catch(err => setError(err.message));
     };
 
+    const handleDelete = (id) => {
+      fetch(`/api/v1/customers/${id}`, { method: 'DELETE' })
+        .then(response => {
+          if (response.status === 204) {
+            loadCustomers();
+          } else if (response.status === 404) {
+            // already gone, refetch to sync
+            loadCustomers();
+          } else {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+        })
+        .catch(err => setError(err.message));
+    };
+  // TODO A - handleDelete(id).
+  //   Lives here, not in the row, for the same reason loadCustomers does: this component owns
+  //   the data, so it owns every change to it.
+  //
+  //   DELETE /api/v1/customers/{id}, then decide what each status means:
+  //     204 -> gone. call loadCustomers() to refetch.
+  //     404 -> already gone. someone else deleted it, or this tab's list is stale. worth
+  //            thinking about before you write it: is that an error to show the user, or is
+  //            the outcome they wanted already true? your answer decides the code.
+  //
+  //   Two design calls that are yours to make, not defaults to accept:
+  //
+  //   1. Confirm first? This is the app's first destructive action and there is no undo.
+  //      window.confirm() is ugly and blocking, and it is also honest about the cost.
+  //
+  //   2. Refetch, or remove the row locally? Refetching costs a round trip but leaves the
+  //      screen agreeing with the database. Removing it locally is instant and assumes the
+  //      delete succeeded - "optimistic" updating. Both are legitimate; pick one on purpose.
+
   useEffect(() =>
     {
     loadCustomers();
@@ -80,6 +113,9 @@ export default function CustomerList() {
             <th>Id</th>
             <th>Username</th>
             <th>Full name</th>
+            <th>Actions</th>
+            {/* TODO B - a fourth <th> for the delete column. An empty <th> is fine; the
+                column has no name because its contents are self-describing. */}
           </tr>
         </thead>
         <tbody>
@@ -87,8 +123,13 @@ export default function CustomerList() {
               without a stable one it falls back to array position, and rows edited or
               deleted later update the wrong row. id is a genuine identity - the API
               guarantees it is unique. */}
+          {/* TODO C - pass handleDelete down as onDelete.
+              Write it the obvious way first: onDelete={handleDelete}, or an inline arrow if
+              you find you need one. Then open React DevTools' Profiler, record a keystroke
+              in the form, and look at whether the rows re-rendered. The answer differs
+              depending on which of those two you wrote, and the difference is the point. */}
           {customers.map(customer => (
-            <CustomerRow key={customer.id} customer={customer} />
+            <CustomerRow key={customer.id} customer={customer} onDelete={handleDelete} />
           ))}
         </tbody>
       </table>

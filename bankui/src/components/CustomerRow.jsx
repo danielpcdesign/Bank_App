@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { Link } from 'react-router'
 
 /*
  * One row of the customer table.
@@ -12,12 +13,25 @@ import { memo } from 'react'
  * needs to cause a change it calls a function the parent passed it. That is the same
  * one-directional discipline as the API layers - the row reports, the list decides.
  */
-function CustomerRow({ customer }) {
+function CustomerRow({ customer, onDelete }) {
   return (
     <tr>
       <td>{customer.id}</td>
       <td>{customer.username}</td>
       <td>{customer.fullName}</td>
+      <td>
+        {/* the destination is built from this row's own data, which is all the row needs to
+            know. it does not navigate and does not know what lives at that path - it states
+            where the customer's edit page is, and the router resolves it. */}
+        <Link to={`/customers/${customer.id}/edit`}>Edit</Link>
+        {' '}
+        {/* onClick calls onDelete with this row's id. the row does not delete anything and
+            does not know what deleting means - it reports that a button was pressed. same
+            contract as the form's onCreated. */}
+        <button type="button" onClick={() => onDelete(customer.id)}>
+          Delete
+        </button>
+      </td>
     </tr>
   );
 }

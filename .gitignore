@@ -4,6 +4,11 @@ AGENTS.md
 .claude/
 PHASE2-PLAN.md
 
+# Residue from a Copilot app-modernization run against a project that is no longer here
+# (banking_app_demo, a JDK 7 -> 25 upgrade). Telemetry hooks and a session log, full of
+# absolute local paths and session GUIDs. .github/workflows/ is the part that ships.
+.github/modernize/
+
 # Build output (javac -d out)
 out/
 

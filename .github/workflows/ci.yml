@@ -1,0 +1,107 @@
+# Continuous integration for both applications.
+#
+# The point of CI is not that it runs the tests - you can do that locally. It is that it runs
+# them somewhere that is NOT your machine: a clean checkout, no IDE, no environment variables
+# you set six weeks ago and forgot. Every assumption the code makes about its surroundings
+# either holds there or fails loudly. "Works on my machine" stops being a defence.
+#
+# Two independent jobs rather than one. They share no state, so GitHub runs them in parallel,
+# and a red build says which application broke without anyone reading a log.
+
+name: CI
+
+on:
+  # every push, on every branch. the stage-branch model means real work happens off main, so
+  # only checking main would report failures long after they were introduced.
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  api:
+    name: API (Java 25)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bankapi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin        # matches the local build - Eclipse Temurin 25
+          java-version: '25'
+          cache: maven                 # ~/.m2 restored between runs; without it every run
+                                       # re-downloads the whole Spring dependency tree
+
+      # -B is batch mode: no ANSI colour codes and no interactive prompts. A CI log is read
+      # after the fact by someone who was not there, so it should be plain text.
+      # clean matters here for the same reason it did locally - stale target/ classes have
+      # already cost this project one confusing failure.
+      - name: Test
+        run: ./mvnw -B clean test
+
+      # No environment variables are set for this job, deliberately. The suite is offline by
+      # design: every test either mocks the repository or overrides the Mongo URI, and the
+      # CORS origins have a committed default. If a test ever starts needing a live Atlas,
+      # this job fails - which is the correct outcome, not an inconvenience.
+
+      - name: Package
+        run: ./mvnw -B -DskipTests package
+
+      # the "build artifact" step of the roadmap's pipeline: code -> artifact -> image ->
+      # container -> pod. This is where the artifact becomes a real, downloadable thing that
+      # a later job (Docker, in the next step of this phase) can consume instead of rebuilding.
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: bankapi-jar
+          path: bankapi/target/*.jar
+
+  ui:
+    name: UI (Node 24)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bankui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: bankui/package-lock.json
+
+      # npm ci, NOT npm install. ci installs exactly what package-lock.json pins and fails if
+      # the lockfile and package.json disagree; install is allowed to resolve a newer version
+      # and quietly rewrite the lock. A build that can silently change its own dependencies is
+      # not reproducible, which defeats the purpose of running it here.
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: bankui-dist
+          path: bankui/dist
+
+# Deliberately NOT here yet, so the gap is on the record rather than implied by silence:
+#
+#   - The Postman/newman collection. It needs a running API and a live database, which means
+#     a MongoDB service container and a start-wait-run-stop sequence. That is integration
+#     testing, a different shape from these two jobs, and it belongs with the Docker work
+#     where a runnable image already exists.
+#
+#   - Any deploy step. This pipeline builds and verifies; it does not ship. CD comes after
+#     there is somewhere to ship to (Phase 11).

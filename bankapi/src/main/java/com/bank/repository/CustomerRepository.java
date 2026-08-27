@@ -75,7 +75,8 @@ public class CustomerRepository
     // otherwise build the replacement from data using path as key
     public Optional<Customer> editCustomer(int id, Customer data)
     {
-        if(!mongo.existsById(id)) //ensure entry exists. save will overwrite if it does. implicitly force agreement between path and body id
+        // existence is checked on the path id, and the replacement is keyed by the path id.
+        if (!mongo.existsById(id))
         {
             return Optional.empty();
         }

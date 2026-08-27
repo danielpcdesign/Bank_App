@@ -6,3 +6,10 @@ PHASE2-PLAN.md
 
 # Build output (javac -d out)
 out/
+
+# Postman's git integration writes a second, exploded copy of the collection here.
+# The single source of truth is bankapi/postman/*.json - that is what newman and CI run.
+# Two representations of the same collection drift; the tree wins in the GUI while the
+# json goes stale, and newman then tests requests nobody is using.
+/postman/
+.postman/

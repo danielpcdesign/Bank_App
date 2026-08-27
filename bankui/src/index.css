@@ -1,0 +1,43 @@
+/* Deliberately minimal. Styling is not what this phase is for, and an unstyled page makes a
+   rendering bug obvious instead of hiding it behind a layout that looks intentional. */
+
+:root {
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+}
+
+h1 {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid;
+  padding: 0.4rem 0.9rem;
+  text-align: left;
+}
+
+.error {
+  color: #c0392b;
+}
+
+/* Deliberately neutral. `message` holds both outcomes - "Customer created successfully" and
+   "ID already taken" - so a green success box would be wrong half the time. Colouring it
+   would mean storing the kind of message alongside the text, not just the text. */
+.message {
+  display: inline-block;
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 0.4rem 0.8rem;
+}

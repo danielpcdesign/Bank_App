@@ -1,0 +1,12 @@
+# The build context is uploaded to the Docker daemon before the first instruction runs.
+# node_modules is the big one - tens of thousands of files, and the image reinstalls them
+# from package-lock.json anyway. Sending it would be slow AND wrong: native modules compiled
+# against Windows would be copied into a Linux image.
+
+node_modules/
+dist/
+*.log
+.git/
+.gitignore
+.vscode/
+.idea/

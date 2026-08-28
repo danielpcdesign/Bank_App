@@ -1,0 +1,12 @@
+# Everything not listed here is uploaded to the Docker daemon as the "build context" before
+# the first instruction runs. target/ alone is 35 MB of jar that the image rebuilds from
+# source anyway - shipping it would slow every build and change the context hash on every
+# local compile, defeating the layer cache the Dockerfile is carefully arranged to use.
+
+target/
+*.log
+.git/
+.gitignore
+.idea/
+.vscode/
+*.iml

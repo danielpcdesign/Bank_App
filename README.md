@@ -38,8 +38,10 @@ Banking_App/
 │   ├── postman/              importable API collection with assertions
 │   └── mvnw / mvnw.cmd       Maven wrapper
 └── bankui/                   Phase 8 — React front end
-    ├── src/components/       pieces — CustomerList, CustomerRow, AddCustomerForm
-    ├── src/pages/            route destinations — EditCustomerPage
+    ├── src/services/         api.js — the only code that knows the API is HTTP
+    ├── src/components/       pieces — Navbar, CustomerList, CustomerRow, AddCustomerForm
+    ├── src/pages/            route destinations — Home, Customers, EditCustomer,
+    │                         About, Contact, Login, NotFound
     └── vite.config.js        dev server + /api proxy
 ```
 
@@ -158,13 +160,35 @@ npm run dev
 
 | Route | View |
 |---|---|
-| `/` | customer table, plus the create form |
+| `/` | landing page — what the app does today, and what is coming |
+| `/customers` | customer table, plus the create form |
 | `/customers/{id}/edit` | edit one customer's username and full name |
-| anything else | "No such page" — the client-side 404 |
+| `/about` | static placeholder |
+| `/contact` | static placeholder |
+| `/login` | placeholder — collects credentials and authenticates nobody |
+| anything else | the client-side 404 |
 
-Every endpoint in the table above is reachable from the UI. The id field is editable when **creating** — ids are assigned by hand in this API — and is deliberately not editable when **editing**, because the path is the record's identity. Changing an id is not an edit; it is a delete plus a create, which the API already exposes separately.
+Every endpoint in the API table above is reachable from the UI. The id field is editable when **creating** — ids are assigned by hand in this API — and is deliberately not editable when **editing**, because the path is the record's identity. Changing an id is not an edit; it is a delete plus a create, which the API already exposes separately.
 
-### 3. The dev proxy, and why it is temporary
+`/login` renders a real form and submits nowhere. That is deliberate rather than unfinished: the tempting placeholder is to accept any credentials and set an `isLoggedIn` flag, which is not a weak login but *not a login at all* — the API would still serve every endpoint to anyone who asks, and the check would be a variable a user flips in DevTools. Authentication is a server decision, and it arrives in Phase 10.
+
+### 3. How it is structured
+
+Three directories, each answering a different question:
+
+| Directory | Holds | Test for belonging |
+|---|---|---|
+| `services/` | every HTTP call | does it know the API is reached over the network? |
+| `pages/` | route destinations | does a `<Route>` render it? |
+| `components/` | the pieces pages are built from | could you render it with made-up props? |
+
+**`services/api.js` is the front end's repository layer.** It is the only file that knows the API lives at `/api/v1` over HTTP; components ask for `getCustomers()` and never see a `fetch`. The base path is written once, and the rules that are easy to forget at a call site — that `fetch` does not reject on a 500, that Spring answers `415` without a `Content-Type` header — are enforced in one place.
+
+It normalises *transport* but deliberately not *meaning*. Failures are thrown as an `ApiError` carrying `.status`, because `409` and `400` say different things to a user and only the caller knows which matter on its screen. Same division as the API's own service returning a `boolean` and letting the controller pick the status code.
+
+**Container and presentational components.** `CustomersPage` owns the state, calls the API, and decides what a failure means. `CustomerList` takes an array and draws a table — no state, no fetching, no idea where the data came from. Splitting them means the table is reusable anywhere, and everything with a *decision* in it lives in one file.
+
+### 4. The dev proxy, and why it is temporary
 
 `vite.config.js` forwards `/api` to `localhost:8080`:
 
@@ -174,7 +198,7 @@ server: { proxy: { '/api': 'http://localhost:8080' } }
 
 The browser therefore only ever talks to `:5173`, and Vite relays to Spring server-side where the same-origin policy does not apply. This is a **development convenience, not the deployed topology**. Once the two are served separately the requests are genuinely cross-origin and the API has to allow them explicitly — configured in Phase 9, along with the other half of the same debt: `BrowserRouter` uses the History API, so a deep link to `/customers/2/edit` is a real `GET` for that path and the server must answer `index.html` rather than 404. Vite does both for free in development, which is exactly why they are easy to forget.
 
-### 4. Build
+### 5. Build
 
 ```bash
 npm run build     # → bankui/dist
@@ -208,6 +232,8 @@ bankui (React)  →  controller → service → repository → MongoDB Atlas
 Each layer talks only to the one below it. The controller never touches the repository, and the repository never formats a response.
 
 The front end sits outside that chain entirely. Everything it knows about the server is five URLs and their status codes — the contract published at `/v3/api-docs`. It has no build-time dependency on the API and no shared code with it, which is what makes them separately deployable in Phase 9.
+
+Those five URLs live in exactly one file, `bankui/src/services/api.js`. That is the front-end mirror of the same rule the repository package follows on the server: one layer knows how the thing behind it is reached, and everything above it is written in the application's own vocabulary. It is also what makes the contract auditable — the complete set of requests this UI can make is a nine-line block at the bottom of that file, so a gap like the missing filter/search shows up as an absence you can see.
 
 `CustomerRepository` **wraps** a Spring Data `MongoRepository` rather than being replaced by one. That costs an extra class of mostly delegation, and buys two things: the service keeps speaking the application's vocabulary instead of Spring Data's, and `MongoRepository`'s two dozen other methods — `deleteAll()` among them — stay out of reach of business logic.
 

@@ -7,6 +7,15 @@
 #
 # Two independent jobs rather than one. They share no state, so GitHub runs them in parallel,
 # and a red build says which application broke without anyone reading a log.
+#
+# Two different Node versions live in this file and they are unrelated:
+#   node-version: '24'   - the Node the UI is BUILT with. Ours to choose.
+#   the @vN on each uses: - the runtime the ACTION ITSELF runs on. GitHub's to choose, and
+#                           it deprecates old ones. v4 actions run on Node 20, now deprecated;
+#                           these majors run on Node 24.
+# Pinned to a major tag rather than a commit SHA. The tag floats to the newest patch, which
+# is what you want for security fixes. SHA pinning trades that for supply-chain immutability
+# and is a Phase 10 conversation, not a Phase 9 one.
 
 name: CI
 
@@ -26,10 +35,10 @@ jobs:
         working-directory: bankapi
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin        # matches the local build - Eclipse Temurin 25
           java-version: '25'
@@ -55,7 +64,7 @@ jobs:
       # container -> pod. This is where the artifact becomes a real, downloadable thing that
       # a later job (Docker, in the next step of this phase) can consume instead of rebuilding.
       - name: Upload jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bankapi-jar
           path: bankapi/target/*.jar
@@ -68,10 +77,10 @@ jobs:
         working-directory: bankui
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
@@ -91,7 +100,7 @@ jobs:
         run: npm run build
 
       - name: Upload bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bankui-dist
           path: bankui/dist

@@ -45,6 +45,17 @@ jobs:
           cache: maven                 # ~/.m2 restored between runs; without it every run
                                        # re-downloads the whole Spring dependency tree
 
+      # Defensive, and it should not be necessary. mvnw is a shell script and git tracks its
+      # executable bit, but that bit does not survive being re-staged from a Windows working
+      # tree - Windows has no such permission, so the mode reverts to 644 and the runner
+      # answers "./mvnw: Permission denied" before reading a single line of the script.
+      #
+      # Setting the bit in the index is the correct fix; this line is here because that fix
+      # has been lost twice already. A pipeline should not be one stray `git add` away from
+      # red on an unrelated change.
+      - name: Make the Maven wrapper executable
+        run: chmod +x ./mvnw
+
       # -B is batch mode: no ANSI colour codes and no interactive prompts. A CI log is read
       # after the fact by someone who was not there, so it should be plain text.
       # clean matters here for the same reason it did locally - stale target/ classes have

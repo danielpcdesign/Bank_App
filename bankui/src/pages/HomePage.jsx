@@ -1,0 +1,46 @@
+import { Link } from 'react-router'
+
+/*
+ * The landing page.
+ *
+ * Static - no state, no effects, no props. Worth saying out loud because it is easy to
+ * assume every React component needs hooks: a component is just a function returning
+ * markup, and one that returns the same markup every time is the simplest and cheapest kind
+ * there is. Reach for state when something actually changes.
+ *
+ * PLACEHOLDER, and honest about it. The copy below describes what the app genuinely does
+ * today rather than inventing features - a landing page promising "instant transfers" while
+ * the API exposes CRUD on customers is a lie that gets shipped. It will grow as phases land.
+ */
+export default function HomePage() {
+  return (
+    <section>
+      <h1>Bank App</h1>
+      <p className="lead">
+        A customer management service built through the JUMP by Cognixia programme -
+        Spring Boot and MongoDB behind a React front end.
+      </p>
+
+      <h2>What you can do today</h2>
+      <ul>
+        <li>Browse the customer directory</li>
+        <li>Add a customer</li>
+        <li>Edit a customer&rsquo;s details</li>
+        <li>Remove a customer</li>
+      </ul>
+
+      {/* Link, not a button with an onClick + navigate(). A navigation that a user chooses
+          should be a real link: it can be middle-clicked into a new tab, copied, and read
+          by a screen reader as a destination. useNavigate is for moves that are a
+          CONSEQUENCE - a save completing - where there is nothing to click. */}
+      <p><Link to="/customers">Go to the customer directory &rarr;</Link></p>
+
+      <h2>Coming next</h2>
+      <ul>
+        <li>Accounts and transactions</li>
+        <li>Sign in, with the API enforcing it</li>
+        <li>Search and filtering</li>
+      </ul>
+    </section>
+  )
+}

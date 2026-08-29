@@ -1,5 +1,9 @@
-/* Deliberately minimal. Styling is not what this phase is for, and an unstyled page makes a
-   rendering bug obvious instead of hiding it behind a layout that looks intentional. */
+/* Still deliberately minimal. Styling is not what this phase is for, and a plain page makes
+   a rendering bug obvious instead of hiding it behind a layout that looks intentional.
+
+   What was added: only what the new shell needs to READ as a shell - a nav that looks like a
+   nav, a page body that does not run the full width of a monitor, and a visible marker for
+   the current page. Everything else is left alone. */
 
 :root {
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
@@ -9,13 +13,123 @@
 
 body {
   margin: 0;
-  padding: 2rem;
 }
+
+/* ---------------------------------------------------------------- layout shell */
+
+/* The shell is a column: header, main, footer. min-height 100vh with main allowed to grow
+   keeps the footer at the bottom of a short page without pinning it over the content of a
+   long one - the thing `position: fixed` gets wrong. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-header,
+.app-main,
+.app-footer {
+  /* One measure shared by all three, so the brand, the content, and the footer line up.
+     ch units are relative to the font, so the line length stays readable if the user
+     changes their text size - which px would not. */
+  max-width: 90ch;
+  margin: 0 auto;
+  padding: 1rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 2rem;
+  border-bottom: 1px solid;
+  flex-wrap: wrap;
+}
+
+.app-main {
+  flex: 1;
+  padding-block: 2rem;
+}
+
+.app-footer {
+  border-top: 1px solid;
+  opacity: 0.7;
+}
+
+.brand {
+  font-size: 1.3rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------- navigation */
+
+.navbar {
+  display: flex;
+  align-items: baseline;
+  gap: 1.25rem;
+  flex: 1;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: inherit;
+  padding-bottom: 0.15rem;
+  border-bottom: 2px solid transparent;
+}
+
+.nav-link:hover {
+  border-bottom-color: currentColor;
+}
+
+/* The current page. NavLink adds this class itself, from the URL - nothing in the app tracks
+   it. Underline AND weight rather than colour alone: colour is the one signal a
+   colour-blind user may not receive, so it should never be the only one carrying meaning. */
+.nav-link.active {
+  font-weight: 600;
+  border-bottom-color: currentColor;
+}
+
+/* margin-left: auto in a flex row eats all the free space to the left of this item, pushing
+   it to the far end. No spacer element, no float. */
+#nav-login {
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------- content */
 
 h1 {
   font-size: 1.6rem;
   font-weight: 600;
+  margin-top: 0;
 }
+
+h2 {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.lead {
+  font-size: 1.05rem;
+  max-width: 65ch;
+}
+
+.muted {
+  opacity: 0.7;
+  font-size: 0.9rem;
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0 0 0.6rem 0;
+}
+
+/* ---------------------------------------------------------------- table + forms */
 
 table {
   border-collapse: collapse;
@@ -26,6 +140,18 @@ td {
   border: 1px solid;
   padding: 0.4rem 0.9rem;
   text-align: left;
+}
+
+/* Each field is a label wrapping its input, so clicking the text focuses the field - which
+   is free when the input is nested inside, and needs a matching id/for pair when it is not.
+   block turns the row of them into a stack. */
+form label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+form input {
+  margin-left: 0.5rem;
 }
 
 .error {

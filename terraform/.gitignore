@@ -1,0 +1,13 @@
+# Terraform working directory and provider binaries - hundreds of MB, machine-specific.
+.terraform/
+.terraform.lock.hcl
+
+# State. Local state is fine for a training project, but it must never be committed: it is
+# a full record of what exists, and for many resource types it contains values that were
+# only ever meant to be inputs.
+*.tfstate
+*.tfstate.*
+
+# Variable files that might carry real values. terraform.tfvars is the conventional place
+# for per-person settings, which in a shared account means someone's identity.
+*.tfvars

@@ -44,7 +44,6 @@ export default function AdminDashboard({
   ownerOf,
   onDeleteAccount,
   onDeleteCustomer,
-  onRoleChange,
   onChanged,
 }) {
   return (
@@ -72,24 +71,20 @@ export default function AdminDashboard({
 
       <h2>All customers</h2>
 
-      {/* reused from CustomersPage. It renders Edit and Accounts links and a Delete button,
-          takes onDelete, and had no idea it was being put on a second screen - the whole
-          benefit of it never having known where its array came from. onRoleChange is the one
-          prop the customers page does not pass, and it adds the Role column below. */}
-      <CustomerList
-        customers={customers}
-        onDelete={onDeleteCustomer}
-        onRoleChange={onRoleChange}
-      />
+      {/* This is now the ONLY place the customer list appears. It used to also have its own
+          route at /customers, which any signed-in customer could reach and use to delete
+          anybody - the gap the user found. The route is gone; the list lives here. */}
+      <CustomerList customers={customers} onDelete={onDeleteCustomer} />
 
-      {/* ON SCREEN, not only in a comment. A role selector that appears on one dashboard and
-          not the other reads as a permission unless something says otherwise, and the person
-          most likely to draw that conclusion is the one who never opens the source. The
-          separation is real as a piece of product design and entirely absent as a control. */}
+      {/* ON SCREEN, not only in a comment, and the two halves of this are deliberately not
+          the same claim. The first sentence describes something the server does; the second
+          describes something only this interface does. A reader who cannot tell those apart
+          will trust the wrong one. */}
       <p className="muted">
-        Roles can be changed here and nowhere else in this interface. That is a choice about
-        where the control belongs, not a restriction: the API accepts a role change from any
-        caller, with no credential.
+        Roles are fixed. No endpoint changes a customer&rsquo;s role, so the only administrators
+        are the ones created at seed time &mdash; that part is enforced by the server and holds
+        for any caller. Restricting this list to administrators is not: the API still serves
+        every customer, and every delete, to anyone who asks.
       </p>
 
       {/* the same component the public register page renders, with a different heading and

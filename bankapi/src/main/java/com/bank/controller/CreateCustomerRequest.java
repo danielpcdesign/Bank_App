@@ -21,14 +21,17 @@ import jakarta.validation.constraints.NotBlank;
  * one way a customer comes into existence. Do not re-add /register believing self-service
  * needs its own route - it is this.
  *
- * WHAT THIS DOES AND DOES NOT GUARANTEE - read both halves:
+ * WHAT THIS GUARANTEES, and it is now the whole statement rather than half of it:
  *
- *   TRUE: no create path anywhere in this API can mint an admin. Not "will not" - cannot.
+ *   NO CALLER CAN SET A ROLE ANYWHERE IN THIS API. Not on create - there is no field for
+ *   one here. Not on update - PUT /api/v1/customers/{id} no longer writes role either.
+ *   Roles are assigned at seed time and by nothing else, so this holds for curl exactly as
+ *   it holds for the UI.
  *
- *   FALSE: that the API cannot mint an admin. PUT /api/v1/customers/{id} still accepts a
- *   role from any caller, by an explicit decision that role changes stay on PUT with
- *   UI-only gating. So an anonymous caller can create a customer here and then PUT itself
- *   to ADMIN. The create path is closed; the update path is open, deliberately.
+ * This comment previously said the opposite: that PUT left the update path open and a
+ * caller could create a customer here and then promote itself. That was true when written
+ * and is not any more. What it costs, so nobody is surprised: promoting a second admin
+ * needs a database edit or a code change, and there is deliberately no endpoint for it.
  */
 public record CreateCustomerRequest(@NotBlank String username, @NotBlank String password, @NotBlank String fullName)
 {

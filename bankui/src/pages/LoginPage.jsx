@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 
-import NoAuthNotice from '../components/NoAuthNotice.jsx'
 import { signIn } from '../services/api.js'
 import { setSignedInId } from '../services/viewer.js'
 
@@ -159,7 +158,6 @@ export default function LoginPage() {
     <section>
       <h1>Sign in</h1>
 
-      <NoAuthNotice />
 
       <form onSubmit={handleSubmit}>
         <label>

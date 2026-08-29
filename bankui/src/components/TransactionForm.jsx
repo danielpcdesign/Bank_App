@@ -11,6 +11,16 @@ import { deposit, withdraw } from '../services/api.js'
  * something happened rather than reaching for the list it does not own. The parent decides
  * what that means.
  *
+ * WHAT THIS BUTTON ACTUALLY IS, before anything else. It calls an endpoint with NO OWNERSHIP
+ * CHECK. POST /api/v1/accounts/{id}/withdraw takes an account id and an amount, from any
+ * caller, with no credential - verified live. It is not a privileged operation this UI happens
+ * to expose to the right person; it is an open endpoint this UI happens to call with an id it
+ * fetched. The account's own rules ARE enforced for everyone - the overdraft floor holds
+ * against curl exactly as it holds here - but "may this person touch this account" is asked by
+ * nobody, because answering it needs an authenticated principal and there is none until phase
+ * 10. services/api.js states the full position; do not infer from the sign-in gate that this
+ * is covered.
+ *
  * THE THREE OUTCOMES, which is the whole reason this file is more than ten lines.
  *
  * The API's deposit/withdraw resolve to a boolean meaning "did the rules allow it", not "did

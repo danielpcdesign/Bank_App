@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import CreateCustomerForm from '../components/CreateCustomerForm.jsx'
-import NoAuthNotice from '../components/NoAuthNotice.jsx'
 import { signIn } from '../services/api.js'
 import { setSignedInId } from '../services/viewer.js'
 
@@ -31,11 +30,15 @@ import { setSignedInId } from '../services/viewer.js'
  * not. The capability is gone from the create path, on the server, which is the only place a
  * capability can be removed.
  *
- * AND THE LIMIT. That is the CREATE path only. PUT /api/v1/customers/{id} still accepts a role
- * from any caller with no credential - the deliberate UI-only gating decision recorded on
- * setCustomerRole. Anybody may register here and then promote themselves with a single PUT.
- * "Registration cannot mint an administrator" is true. "The API cannot mint an administrator"
- * is false, and nothing on this page implies it.
+ * THE LIMIT THAT USED TO APPLY HERE IS GONE. This comment previously said the create path was
+ * the only one closed, because PUT /api/v1/customers/{id} still took a role from any caller -
+ * so registering here and then promoting yourself with a single PUT was possible. It is not
+ * any more: PUT replaces username and fullName, and role is server-owned.
+ *
+ * NO CALLER, THROUGH ANY ENDPOINT, CAN CHANGE ANY CUSTOMER'S ROLE. Registering gets you a
+ * customer account and there is no path from there to an administrator's - not through this
+ * page, not through curl. Administrators come from the seed, and adding one means a database
+ * edit or a code change, which is the price of that being true.
  */
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -105,7 +108,6 @@ export default function RegisterPage() {
     <section>
       <h1>Create an account</h1>
 
-      <NoAuthNotice />
 
       <CreateCustomerForm
         submitLabel="Create account"

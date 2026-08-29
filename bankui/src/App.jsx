@@ -1,10 +1,10 @@
 import { Link, Route, Routes } from 'react-router'
 
 import Navbar from './components/Navbar.jsx'
+import RequireAdmin from './components/RequireAdmin.jsx'
 import RequireSignIn from './components/RequireSignIn.jsx'
 import AboutPage from './pages/AboutPage.jsx'
 import ContactPage from './pages/ContactPage.jsx'
-import CustomersPage from './pages/CustomersPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import EditCustomerPage from './pages/EditCustomerPage.jsx'
 import HomePage from './pages/HomePage.jsx'
@@ -75,26 +75,46 @@ function App() {
               This is a PRODUCT decision and not a security control: the API answers every
               one of these endpoints for any caller with no credential, so this stops a
               person browsing and stops nobody else. RequireSignIn sets out what it does and
-              does not buy, and NoAuthNotice says the same thing on the screen.
+              does not buy. Nothing says it on the SCREEN any more - see services/api.js on
+              why the user-facing banner was removed and why this comment was not.
               ============================================================================ */}
           <Route element={<RequireSignIn />}>
 
             <Route path="/" element={<HomePage />} />
 
-            {/* MOVED. The customer list used to be what "/" rendered. Now "/" is a landing
-                page and the list has its own address.
+            {/* /customers IS GONE, and its absence is the fix rather than a tidy-up.
+                
+                It was a standalone route listing every customer, with create and delete on
+                it, sitting behind RequireSignIn - which asks whether somebody is signed in
+                and never who. So any registered customer could type /customers and get the
+                administrative surface: everyone's details, a create form, and a Delete
+                button next to every row including the administrators.
 
-                A route should name one thing, and "/" was naming two: "the app" and "the
-                customer list". So there was no URL that meant "show me the customers", and
-                nowhere to put a home page without displacing them. Splitting it also makes
-                the list linkable, which starts to matter the moment there is more than one
-                screen worth linking to. */}
-            <Route path="/customers" element={<CustomersPage />} />
+                The list now lives inside AdminDashboard and has no address of its own. A
+                route that must not be reachable is best not existing; the surest gate on a
+                URL is that nothing answers it. CustomersPage was deleted rather than moved,
+                because the dashboard's container already fetched the same customers and
+                already owned the delete - keeping it would have meant two owners of one
+                list. */}
 
-            {/* :id is a URL parameter, not a literal. It matches any single segment and
-                hands the value to the component via useParams. This is what makes a route a
-                route rather than a page name: the URL carries state. */}
-            <Route path="/customers/:id/edit" element={<EditCustomerPage />} />
+            {/* ADMIN ONLY, and gated by RequireAdmin rather than by nothing.
+
+                Editing a customer is admin-only end to end, so unlike the dashboard there IS
+                a route to wrap here, and the gate belongs outside the page so the page is
+                never reached. RequireAdmin has to fetch to learn a role - the role is
+                deliberately not stored client-side - so it renders nothing but a loading
+                line until the answer arrives, and returns <Outlet /> only once the signed-in
+                customer is confirmed to be an administrator.
+
+                Still a product boundary and not a security one: PUT /customers/{id} is
+                served to any caller with no credential, so this stops a customer stumbling
+                in and stops nobody with curl. */}
+            <Route element={<RequireAdmin />}>
+              {/* :id is a URL parameter, not a literal. It matches any single segment and
+                  hands the value to the component via useParams. This is what makes a route
+                  a route rather than a page name: the URL carries state. */}
+              <Route path="/customers/:id/edit" element={<EditCustomerPage />} />
+            </Route>
 
             {/* THE IDENTITY IS IN THE PATH. /dashboard/4 shows customer 4 because the
                 address says 4, and a signed-in visitor can still edit the number and see

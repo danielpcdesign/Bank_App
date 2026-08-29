@@ -94,46 +94,11 @@ class CustomerControllerTest
     // the 400 alone would not prove that - verifyNoInteractions is what does.
 
 
-    @Test
-    void editCustomer_returns400AndNeverCallsTheService_whenBodyIdDiffersFromPathId() throws Exception
-    {
-        mockMvc.perform(put("/api/v1/customers/2")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":5,\"username\":\"nina\",\"fullName\":\"Nina Cortez\",\"role\":\"CUSTOMER\",\"password\":\"pw123\"}"))
-                .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(service);
-    }
-
-    @Test
-    void editCustomer_returns404_whenNoCustomerHasThatId() throws Exception
-    {
-        // absence is established before the edit is attempted, so this never reaches the service
-        when(service.getCustomerById(99)).thenReturn(Optional.empty());
-
-        mockMvc.perform(put("/api/v1/customers/99")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":99,\"username\":\"nina\",\"fullName\":\"Nina Cortez\",\"role\":\"CUSTOMER\",\"password\":\"pw123\"}"))
-                .andExpect(status().isNotFound());
-    }
     //   when(service.editCustomer(eq(99), any(Customer.class))).thenReturn(Optional.empty())
     //   note eq(99) rather than plain 99: once one argument is a matcher they all must be,
     //   or mockito throws InvalidUseOfMatchersException.
 
-    @Test
-    void editCustomer_returns200AndTheUpdatedCustomer_whenTheServiceReturnsIt() throws Exception
-    {
-        when(service.getCustomerById(99)).thenReturn(Optional.of(new Customer(99, "nina", "Nina Cortez")));
-        when(service.editCustomer(eq(99), any(Customer.class))).thenReturn(Optional.of(new Customer(99, "nina", "Nina Cortez")));
-
-        mockMvc.perform(put("/api/v1/customers/99")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":99,\"username\":\"nina\",\"fullName\":\"Nina Cortez\",\"role\":\"CUSTOMER\",\"password\":\"pw123\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(99))
-                .andExpect(jsonPath("$.username").value("nina"))
-                .andExpect(jsonPath("$.fullName").value("Nina Cortez"));
-    }
 
     @Test
     void deleteCustomer_returns204_whenTheServiceReportsTrue() throws Exception
@@ -287,43 +252,11 @@ class CustomerControllerTest
     // role, accountIds and password have NO SETTERS. these assert they still arrive on the
     // object handed to the service - the single path capable of breaking every write.
 
-    @Test
-    void editCustomer_bindsRoleAccountIdsAndPasswordFromTheBody() throws Exception
-    {
-        when(service.getCustomerById(5)).thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
-        when(service.editCustomer(eq(5), any(Customer.class)))
-            .thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
-
-        mockMvc.perform(put("/api/v1/customers/5")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":5,\"username\":\"nina\",\"fullName\":\"Nina Cortez\","
-                           + "\"role\":\"ADMIN\",\"accountIds\":[103],\"password\":\"pw456\"}"))
-                .andExpect(status().isOk());
-
-        ArgumentCaptor<Customer> sent = ArgumentCaptor.forClass(Customer.class);
-        verify(service).editCustomer(eq(5), sent.capture());
-
-        assertThat(sent.getValue().getRole()).isEqualTo(Role.ADMIN);
-        assertThat(sent.getValue().getAccountIds()).containsExactly(103);
-        assertThat(sent.getValue().getPassword()).isEqualTo("pw456");
-    }
 
     //----------------------------------------------------------------PASSWORD AND PUT----------------------------------------------------------------
 
     // a client is never sent a password (WRITE_ONLY), so it cannot echo one back. if PUT
     // required it, editing a customer would be impossible from any client at all.
-    @Test
-    void editCustomer_succeeds_whenTheBodyOmitsThePassword() throws Exception
-    {
-        when(service.getCustomerById(5)).thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
-        when(service.editCustomer(eq(5), any(Customer.class)))
-            .thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
-
-        mockMvc.perform(put("/api/v1/customers/5")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":5,\"username\":\"nina\",\"fullName\":\"Nina Cortez\",\"role\":\"CUSTOMER\"}"))
-                .andExpect(status().isOk());
-    }
 
     // password lost its @NotBlank so that PUT could work, so CREATE now enforces it in the
     // controller instead. these two are what stop that move from quietly dropping the
@@ -332,23 +265,6 @@ class CustomerControllerTest
 
     // the whole point of the exemption: a client that supplies a password on PUT still
     // changes it. the field is preserved when omitted, not frozen.
-    @Test
-    void editCustomer_stillAcceptsAPassword_whenTheBodySuppliesOne() throws Exception
-    {
-        when(service.getCustomerById(5)).thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
-        when(service.editCustomer(eq(5), any(Customer.class)))
-            .thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
-
-        mockMvc.perform(put("/api/v1/customers/5")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":5,\"username\":\"nina\",\"fullName\":\"Nina Cortez\","
-                           + "\"role\":\"CUSTOMER\",\"password\":\"newpw\"}"))
-                .andExpect(status().isOk());
-
-        ArgumentCaptor<Customer> sent = ArgumentCaptor.forClass(Customer.class);
-        verify(service).editCustomer(eq(5), sent.capture());
-        assertThat(sent.getValue().getPassword()).isEqualTo("newpw");
-    }
 
     //----------------------------------------------------------------CREATE----------------------------------------------------------------
 
@@ -423,6 +339,94 @@ class CustomerControllerTest
         mockMvc.perform(post("/api/v1/customers")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"username\":\"nina\",\"fullName\":\"Nina Cortez\"}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
+    //----------------------------------------------------------------THE LAST ADMIN----------------------------------------------------------------
+
+    /*
+     * 409 rather than 403. 403 would claim the caller lacks permission, and there is no
+     * caller identity here to lack anything - the request is refused because of the state of
+     * the system, not because of who sent it. That is the project's own reasoning for 409
+     * everywhere else: state-dependent, and the same request succeeds once another admin
+     * exists. It is also the one refusal in this API that curl cannot talk its way past.
+     */
+    @Test
+    void deleteCustomer_returns409_whenTheTargetIsTheLastAdmin() throws Exception
+    {
+        when(service.getCustomerById(4)).thenReturn(Optional.of(
+            new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN, "admin123")));
+        when(service.deleteCustomerById(4)).thenReturn(false);
+
+        mockMvc.perform(delete("/api/v1/customers/4"))
+                .andExpect(status().isConflict());
+    }
+
+    // demotion is refused by the same invariant and reported the same way - it reaches the
+    // identical end state, so it cannot be the cheaper way around the delete guard.
+
+    //----------------------------------------------------------------UPDATE----------------------------------------------------------------
+
+    /*
+     * THE TEST THAT WOULD HAVE CAUGHT ALL THREE OF THESE BUGS, and did not exist for any of
+     * them. Every previous edit test sent a FULL body, so none could notice that a field the
+     * client is not allowed to change was still a field it was required to send.
+     *
+     * This sends exactly what a client owns and nothing else, and asserts the edit APPLIES -
+     * not merely that the other fields survived it.
+     */
+    @Test
+    void editCustomer_returns200AndAppliesTheChange_whenTheBodyCarriesOnlyTheOwnedFields() throws Exception
+    {
+        when(service.editCustomer(5, "nina2", "Nina C. Cortez"))
+            .thenReturn(Optional.of(new Customer(5, "nina2", "Nina C. Cortez", List.of(), Role.CUSTOMER, "pw")));
+
+        mockMvc.perform(put("/api/v1/customers/5")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"nina2\",\"fullName\":\"Nina C. Cortez\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("nina2"))
+                .andExpect(jsonPath("$.fullName").value("Nina C. Cortez"))
+                .andExpect(jsonPath("$.password").doesNotExist());
+    }
+
+    // the smuggling case, matching the one on create. extra fields cannot bind to a record
+    // that has no components for them, so the service is handed only the two real values.
+    @Test
+    void editCustomer_ignoresARoleIdPasswordOrAccountIdsSmuggledIntoTheBody() throws Exception
+    {
+        when(service.editCustomer(5, "nina", "Nina Cortez"))
+            .thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez", List.of(), Role.CUSTOMER, "pw")));
+
+        mockMvc.perform(put("/api/v1/customers/5")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"nina\",\"fullName\":\"Nina Cortez\","
+                           + "\"id\":99,\"role\":\"ADMIN\",\"password\":\"hacked\",\"accountIds\":[101]}"))
+                .andExpect(status().isOk());
+
+        // only ever told the two fields the record carries
+        verify(service).editCustomer(5, "nina", "Nina Cortez");
+    }
+
+    @Test
+    void editCustomer_returns404_whenNoCustomerHasThatId() throws Exception
+    {
+        when(service.editCustomer(99, "ghost", "Ghost User")).thenReturn(Optional.empty());
+
+        mockMvc.perform(put("/api/v1/customers/99")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"ghost\",\"fullName\":\"Ghost User\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void editCustomer_returns400AndNeverCallsTheService_whenFullNameIsBlank() throws Exception
+    {
+        mockMvc.perform(put("/api/v1/customers/5")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"nina\",\"fullName\":\"   \"}"))
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(service);

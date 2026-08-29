@@ -6,6 +6,18 @@ import AccountList from './AccountList.jsx'
  * What a customer sees: their own accounts, their balances, and the two operations that move
  * money. Nothing else - no other customer's records, no create, no delete.
  *
+ * "THEIR OWN" IS A DISPLAY CONVENTION, NOT A PROTECTION. The heading below reads "Your
+ * accounts", which could easily be taken as a guarantee, and it is not one. The account
+ * endpoints have no ownership check of any kind: any caller with no credential can read or
+ * drain any account by id - verified live, not inferred. DashboardPage decides which accounts
+ * to FETCH for this screen; nothing decides which accounts a person is ALLOWED to touch,
+ * because that question needs an authenticated principal and there is none until phase 10.
+ *
+ * So this shows one customer's accounts because that is the useful screen, not because the
+ * others are out of reach. services/api.js carries the full statement of what is and is not
+ * enforced; the short version is that the customer-side gating elsewhere in this app does not
+ * extend to accounts at all.
+ *
  * Presentational. It is handed a customer and an array of accounts and draws them; the
  * fetching, the failure handling and the refetch after a transaction all belong to
  * DashboardPage. Rendered with a made-up customer and three made-up accounts it would show

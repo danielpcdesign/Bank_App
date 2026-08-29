@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { Link } from 'react-router'
 
-import { ROLES, roleOf } from '../services/api.js'
+import { roleOf } from '../services/api.js'
 
 /*
  * One row of the customer table.
@@ -15,10 +15,10 @@ import { ROLES, roleOf } from '../services/api.js'
  * needs to cause a change it calls a function the parent passed it. That is the same
  * one-directional discipline as the API layers - the row reports, the list decides.
  */
-function CustomerRow({ customer, onDelete, onRoleChange }) {
+function CustomerRow({ customer, onDelete }) {
 
-  // '' when the record predates the field. Kept distinct from 'customer' so the select below
-  // can report "not set" rather than quietly showing a role nobody chose.
+  // '' when the record predates the field. Kept distinct from 'customer' so the cell below
+  // reports "not set" rather than quietly showing a role nobody chose.
   const role = roleOf(customer)
 
   return (
@@ -27,35 +27,26 @@ function CustomerRow({ customer, onDelete, onRoleChange }) {
       <td>{customer.username}</td>
       <td>{customer.fullName}</td>
 
-      {/* THE ROLE COLUMN APPEARS ONLY WHERE onRoleChange IS PASSED, which is the admin
-          dashboard and nowhere else. The customer dashboard does not render a customer table
-          at all, and the ordinary /customers list passes no handler, so neither shows this.
+      {/* THE ROLE IS SHOWN AND NOT EDITABLE, and that is now a fact about the API rather than
+          a choice this component makes.
 
-          What that separation is: a decision about which screen the operation belongs on.
-          What it is NOT: enforcement. The API accepts a role change from any caller with no
-          credential of any kind, and it will keep doing so. Hiding this select hides it from
-          people using the UI as intended and from nobody else - curl does not render
-          components. The label beside it says as much on the screen, because a reader who
-          never opens this file is exactly the reader who would otherwise assume the
-          restriction is real. */}
-      {onRoleChange && (
-        <td>
-          <select
-            value={role}
-            className="capitalise"
-            onChange={(event) => onRoleChange(customer, event.target.value)}
-          >
-            {/* present only while the record genuinely has no role, and disabled so it cannot
-                be chosen. It REPORTS a state the data is already in rather than offering it:
-                once a role is set there is no way back to having none, and a dropdown
-                implying otherwise would be lying about the model. */}
-            {role === '' && <option value="" disabled>Not set</option>}
-            {ROLES.map(name => (
-              <option key={name} value={name} className="capitalise">{name}</option>
-            ))}
-          </select>
-        </td>
-      )}
+          There used to be a <select> here, switched on by an onRoleChange prop the admin
+          dashboard passed, and a comment explaining at length that its admin-only placement
+          was a decision about which screen an operation belongs on and emphatically NOT
+          enforcement - because the API accepted a role change from any caller with no
+          credential at all.
+
+          That comment is now obsolete rather than wrong. PUT /api/v1/customers/{id} replaces
+          username and fullName and nothing else; role joined id, password and accountIds as
+          server-owned. A selector here would submit, get a 200, change nothing, and redraw the
+          old value - and a control that appears to work while silently doing nothing is worse
+          than no control, because it teaches the operator that the system lies rather than
+          that the operation is unavailable.
+
+          So the column reports instead of offering, and reporting still earns its place: which
+          of these people is an administrator is the first thing somebody reading this table
+          wants to know, and it is the field that decides who can reach this screen at all. */}
+      <td className="capitalise">{role || <span className="muted">not set</span>}</td>
       <td>
         {/* the destination is built from this row's own data, which is all the row needs to
             know. it does not navigate and does not know what lives at that path - it states

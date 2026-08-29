@@ -6,20 +6,19 @@ import CustomerRow from './CustomerRow.jsx'
  * That is the entire contract. No state, no fetching, no idea where the array came from or
  * what happens when Delete is pressed - it calls the function it was handed and stops
  * caring. The same presentational discipline CustomerRow already followed, applied one level
- * up now that the fetching has moved out to CustomersPage.
+ * up now that the fetching lives in the page that owns the data.
  *
  * Everything it needs arrives as props, which means it can be rendered anywhere - a search
- * results screen, a dashboard - without dragging an API call along with it. It is now
- * rendered on two screens, and it took no change to serve the second: the customers page and
- * the admin dashboard hand it different arrays and different handlers, and it draws a table.
+ * results screen, a dashboard - without dragging an API call along with it.
  *
- * onRoleChange is optional and adds a whole column, the same way AccountList's ownerOf does.
- * Passing it is what makes this the admin's version of the table. That is a decision about
- * where an operation belongs on screen and NOT a permission - the API takes a role change
- * from anyone - which is why the control carries a label saying so rather than relying on its
- * absence elsewhere to imply a rule that does not exist.
+ * IT HAS ONE CALLER AGAIN. It briefly had two, and an optional onRoleChange prop that added a
+ * whole column, because the customers page and the admin dashboard wanted different versions
+ * of it. Both of those are gone: the standalone /customers route was removed - any signed-in
+ * customer could reach it and delete anybody - and role editing was removed because the API
+ * stopped accepting it. So the table is unconditional again, which is the simpler thing to
+ * have, and the Role column below is now shown rather than edited.
  */
-export default function CustomerList({ customers, onDelete, onRoleChange }) {
+export default function CustomerList({ customers, onDelete }) {
 
   // an empty list is a legitimate result, not an error, and it deserves a sentence rather
   // than a table with a blank body. the caller has already distinguished this from "still
@@ -36,11 +35,11 @@ export default function CustomerList({ customers, onDelete, onRoleChange }) {
           <th>Id</th>
           <th>Username</th>
           <th>Full name</th>
-          {/* driven by the same prop that fills the cell, so a column can never appear with
-              nothing under it or vice versa - two conditions kept in step by being one. The
-              admin dashboard passes onRoleChange; the ordinary customer list does not, and
-              gets the table it already had. */}
-          {onRoleChange && <th>Role</th>}
+          {/* unconditional now. It was gated behind onRoleChange while the column held an
+              editable selector and only one screen was meant to have it; the column is
+              read-only, this table has one caller, and a condition that is always true is
+              just a place for a bug to live. */}
+          <th>Role</th>
           {/* one column for both Edit and Delete. "Actions" names what the column contains
               rather than what any single control does, which is why it survived adding a
               second one. */}
@@ -55,12 +54,7 @@ export default function CustomerList({ customers, onDelete, onRoleChange }) {
             React strips it for reconciliation, so it has to go on the element the .map()
             creates. */}
         {customers.map(customer => (
-          <CustomerRow
-            key={customer.id}
-            customer={customer}
-            onDelete={onDelete}
-            onRoleChange={onRoleChange}
-          />
+          <CustomerRow key={customer.id} customer={customer} onDelete={onDelete} />
         ))}
       </tbody>
     </table>

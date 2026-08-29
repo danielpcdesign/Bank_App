@@ -12,6 +12,27 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
+/*
+ * A NOTE ON THE VALIDATION ANNOTATIONS BELOW, because what they do changed and it is not
+ * obvious from looking at them.
+ *
+ * Customer is no longer bound as a request body anywhere. Creates bind
+ * CreateCustomerRequest, updates bind UpdateCustomerRequest, sign-in binds SignInRequest -
+ * each carrying exactly the fields that operation owns. That was done because a model-level
+ * annotation applies to EVERY route binding the entity, and three separate live bugs came
+ * from one being right for one route and wrong for another.
+ *
+ * The consequence: @NotNull, @NotBlank and @Positive here are now INERT. They fired through
+ * @Valid @RequestBody and nothing binds this class from a request any more. Nor are they
+ * checked on save - spring-data-mongodb ships a ValidatingMongoEventListener, but Boot does
+ * not auto-configure one (verified against the 4.1.1 jars), so no save-time validation runs.
+ *
+ * They are KEPT because they are now finally saying the right thing: this is what a STORED
+ * customer must look like, which is what a model annotation should always have meant. They
+ * are documentation with a latent enforcement path - registering a ValidatingMongoEventListener
+ * bean would switch them on at save time - rather than a check anything currently performs.
+ * Do not rely on them to reject anything today.
+ */
 @Document(collection = "customers")
 public class Customer
 {
@@ -168,13 +189,27 @@ public class Customer
         this.accountIds = (accountIds == null) ? new ArrayList<>() : new ArrayList<>(accountIds);
     }
 
-    public void setRole(Role role)
-    {
-        this.role = role;
-    }
+    // NO SETTER FOR ROLE, and its absence is deliberate - the same reasoning as the missing
+    // setter for id, and for balance on Account. Roles are assigned at seed time through the
+    // constructor and by nothing else: no create path can express one and PUT does not write
+    // one, so there is no route through this API that changes any customer's role. A setter
+    // here would be the obvious thing to reach for if that ever needed undoing, which is
+    // exactly why it is not sitting here waiting. Promoting a second admin is a database
+    // edit or a code change, on purpose.
+    //
+    // It briefly existed, when PUT still replaced the role from the request body.
 
-    // only called when a caller actually supplied a new password. omitting one on PUT must
-    // leave the stored value alone, so the guard lives at the call site rather than here.
+    /*
+     * CURRENTLY UNUSED, and kept rather than deleted - which is the opposite call to the one
+     * made for setRole, for a reason worth stating.
+     *
+     * No route changes a password any more. PUT used to, back when it bound a whole Customer;
+     * UpdateCustomerRequest carries username and fullName only, so a password can now be set
+     * at creation and never again. That is a GAP, not a guarantee: unlike role - which is
+     * meant to be unsettable and whose setter was removed to make that structural - a
+     * password obviously must be changeable, and the operation to do it is owed rather than
+     * refused. This setter is what that operation will use.
+     */
     public void setPassword(String password)
     {
         this.password = password;

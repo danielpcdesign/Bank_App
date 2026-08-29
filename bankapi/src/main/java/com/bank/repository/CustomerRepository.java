@@ -147,10 +147,8 @@ public class CustomerRepository
 
     // empty Optional when no document has that id.
     // otherwise build the replacement from data using path as key
-    public Optional<Customer> editCustomer(int id, Customer data)
+    public Optional<Customer> editCustomer(int id, String username, String fullName)
     {
-        // findById rather than existsById: the stored password is needed below, and fetching
-        // the document is the only way to keep it.
         Optional<Customer> stored = mongo.findById(id);
         if (stored.isEmpty())
         {
@@ -158,62 +156,34 @@ public class CustomerRepository
         }
 
         /*
-         * THE RULE FOR THIS METHOD, and it is one rule rather than two exceptions:
+         * THE RULE, and it is now the method signature rather than a comment anyone has to
+         * obey:
          *
-         *   PUT fully replaces the fields a client both READS and OWNS.
+         *   PUT replaces the fields a client both READS and OWNS - username and fullName.
          *
-         * Two fields fail that test, each for a different half of it.
+         * There used to be a list here of the four fields this method must be careful NOT to
+         * write, and being careful is exactly what kept failing. The caller cannot pass them
+         * any more: UpdateCustomerRequest has no id, role, password or accountIds, so none of
+         * them reaches this method to be mishandled.
          *
-         * PASSWORD fails the READ half. It is WRITE_ONLY - it goes in and never comes out -
-         * so a client editing a username is never given one and has nothing to send back.
-         * Requiring it made every edit a 400 (verified, not assumed); writing whatever
-         * arrived would blank the password of any client that did not invent a value.
+         * Why each is excluded, kept because the reasoning is still what justifies the shape:
          *
-         * ACCOUNTIDS fails the OWN half. A client can read it, so it can echo it back, and
-         * the front end does exactly that - the list rides through an edit form untouched.
-         * But ownership is maintained by the ACCOUNT endpoints, which add and remove ids as
-         * accounts are opened and closed. Honouring the echo means two endpoints own one
-         * fact, and this one has no idea what it is overwriting: if an account is opened or
-         * closed between the client's GET and its PUT, the stale list is written back and
-         * the newer account is silently unlinked. That window is short on an edit form and
-         * much wider for anything that holds a customer object for a while.
+         *   PASSWORD fails the READ half - WRITE_ONLY, so a client is never given one and has
+         *   nothing to send back. Changing it needs its own operation, which does not exist yet.
+         *   ID fails the OWN half - the path names the record.
+         *   ACCOUNTIDS fails the OWN half - maintained by the account endpoints. Honouring an
+         *   echoed list would let a stale copy unlink an account opened moments earlier.
+         *   ROLE fails the OWN half - assigned at seed time and by nothing else.
          *
-         * Both are therefore taken from the stored document. Supplying a password still
-         * changes it; supplying accountIds does nothing at all, because this is not the
-         * endpoint that owns them.
+         * MUTATE THE STORED DOCUMENT, never rebuild it. A field this method does not mention
+         * keeps the value it already had, which is why dropping fields from the request is
+         * safe here and would not have been under a constructor rebuild.
          */
-        // MUTATE THE STORED CUSTOMER, never rebuild it. A replacement built with a
-        // constructor silently loses whatever that constructor does not take - the bug that
-        // destroyed passwords through the account endpoints. Setting only the fields the
-        // client owns means a field added tomorrow is left ALONE by default, which is the
-        // safe failure, rather than quietly reset to a default.
         Customer customer = stored.get();
-        customer.setUsername(data.getUsername());
-        customer.setFullName(data.getFullName());
+        customer.setUsername(username);
+        customer.setFullName(fullName);
 
-        // role is a field the client both reads and owns, so it is replaced. NOTHING CHECKS
-        // WHO IS ASKING: any caller may PUT role: ADMIN and become an admin. Decided, not
-        // overlooked - the admin-only restriction lives in the FRONT END alone and is
-        // bypassed by curl or any client that is not our UI. Real enforcement needs an
-        // authenticated principal, in phase 10.
-        //
-        // A dedicated PATCH /customers/{id}/role was considered and is not needed: it was
-        // proposed because a role change used to drag a password and an account list through
-        // the request and could lose either, and neither is true any more.
-        customer.setRole(data.getRole());
-
-        // password is set ONLY when one was supplied. It fails the "can the client read it"
-        // half of the rule below - it is WRITE_ONLY, so a client editing a username is never
-        // given one and has nothing to send back. Requiring it made every edit a 400.
-        if (data.getPassword() != null && !data.getPassword().isBlank())
-        {
-            customer.setPassword(data.getPassword());
-        }
-
-        // accountIds is deliberately NOT touched. It fails the "does the client own it" half:
-        // readable and echoable, but maintained by the ACCOUNT endpoints. Honouring the echo
-        // means two endpoints own one fact, and a list that went stale between the client's
-        // GET and this PUT would silently unlink the newer account.
         return Optional.of(mongo.save(customer));
+
     }
 }

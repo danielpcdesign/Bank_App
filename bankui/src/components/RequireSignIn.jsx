@@ -24,7 +24,7 @@ import { getSignedInId } from '../services/viewer.js'
  * a search engine that wandered in. None of those people were attacking anything; they were
  * shown the data because the app volunteered it. Not volunteering it is worth doing on its own
  * terms, and it is a completely different claim from "this data is protected". The first is
- * true. The second is not, and NoAuthNotice says so on the screens behind this gate.
+ * true. The second is not.
  *
  * ==========================================================================================
  * NO LEAKED FRAME

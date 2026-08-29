@@ -3,7 +3,6 @@ import { Link, Navigate, useParams } from 'react-router'
 
 import AdminDashboard from '../components/AdminDashboard.jsx'
 import CustomerDashboard from '../components/CustomerDashboard.jsx'
-import NoAuthNotice from '../components/NoAuthNotice.jsx'
 import {
   accountIdsOf,
   deleteAccount,
@@ -14,7 +13,6 @@ import {
   getCustomers,
   isAdmin,
   roleOf,
-  setCustomerRole,
 } from '../services/api.js'
 import { getSignedInId, signOut } from '../services/viewer.js'
 
@@ -36,26 +34,47 @@ import { getSignedInId, signOut } from '../services/viewer.js'
  * anonymous as the last, and every endpoint continues to answer any caller with no credential
  * at all. So:
  *
- *   /dashboard/4 TYPED INTO THE ADDRESS BAR STILL WORKS, signed in or not. This page does not
- *   check, and that is deliberate rather than an omission. A client-side redirect away from a
- *   URL is not access control: the data behind it is one unauthenticated GET away for anybody
- *   who wants it, and a guard in front of a door with no lock is worse than no guard, because
- *   the next reader believes the door is locked. NoAuthNotice says so on the screen instead.
+ *   THE URL NO LONGER DECIDES WHAT YOU MAY SEE, and this paragraph used to say the opposite.
+ *   It said /dashboard/4 worked for anybody signed in, that this page did not check, and that
+ *   not checking was deliberate because a client-side redirect is not access control.
+ *
+ *   The first two were true and the conclusion was wrong, and a user found out how wrong: a
+ *   registered customer could type an administrator's id and be handed the administrator's
+ *   screen. The reasoning had slipped from "a redirect is not security" - correct - to "so do
+ *   not bother deciding at all", which is not the same claim. Refusing to build a fake lock is
+ *   right; refusing to decide which screen a person gets is just a missing feature, and here
+ *   it was a missing feature that showed every customer in the bank to any of them.
+ *
+ *   So this page decides now, from `me`. It is still not access control - the data behind it
+ *   is one unauthenticated GET away for anybody who wants it - but "not a security boundary"
+ *   and "not a boundary at all" are different things,
+ *   and only the first was ever the intention.
  *
  * The identity therefore lives in TWO places, doing two different jobs, and keeping them
- * apart is what makes the arrangement legible:
+ * apart is what makes the arrangement legible - and confusing them is what caused the bug:
  *
- *   THE URL says which dashboard is being rendered. It is the parameter this component reads,
- *   it is what makes a dashboard linkable, and it is plainly editable by anyone - which is an
- *   honest disclosure of a system that checks nothing, not a leak.
+ *   THE URL says WHICH CUSTOMER'S ACCOUNTS are being displayed. It is an address. It is
+ *   supplied by the person it would have to constrain, so it can say what is being asked for
+ *   and can never say who is entitled to it.
  *
- *   sessionStorage says who signed in, so a refresh does not dump you back at the form. It
- *   holds an id and nothing else - never the password, never the role. services/viewer.js is
- *   the only file that touches it and sets out the compromise in full, including the part
- *   that has to be said out loud: a restore does not re-check the password, so anyone who can
- *   edit sessionStorage can put any id there. That adds no weakness, because typing the URL
- *   already does the same thing - but it WOULD be a genuine vulnerability the moment anything
- *   is enforced, which is why that file is marked for deletion rather than migration.
+ *   sessionStorage says WHO IS ASKING, and it is the only thing consulted for that. It holds
+ *   an id and nothing else - never the password, never the role. services/viewer.js is the
+ *   only file that touches it and sets out the compromise in full, including the part that has
+ *   to be said out loud: a restore does not re-check the password, so anyone willing to edit
+ *   sessionStorage can put any id there and be treated as that person.
+ *
+ *   THAT SENTENCE USED TO END "which adds no weakness, because typing the URL already does the
+ *   same thing", and that reassurance is now expired. It was true while the URL decided the
+ *   dashboard: the two were equivalent, so neither was worth worrying about. Now the URL
+ *   decides nothing and this value decides everything, so editing it is strictly the more
+ *   powerful move of the two.
+ *
+ *   It is still not a NEW weakness, and the reason is worth keeping straight: the API answers
+ *   every one of these requests to any caller with no credential, so nothing behind this is
+ *   protected from anyone determined enough to open DevTools. What changed is that this value
+ *   is now the single input the interface trusts - which is exactly why services/viewer.js is
+ *   marked for deletion rather than migration. A client-held identity the server believes is
+ *   the bug, not a step toward the fix.
  *
  * WHAT WAS REJECTED, and the rejections still matter more than the choice:
  *
@@ -132,16 +151,43 @@ import { getSignedInId, signOut } from '../services/viewer.js'
 export default function DashboardPage() {
   const { id } = useParams()
 
-  // the person whose dashboard this is. null until loaded, so the render can tell "not
-  // loaded" from "loaded" - the same reason EditCustomerPage starts its form as null.
-  const [viewer, setViewer] = useState(null)
+  /*
+   * TWO CUSTOMERS, AND CONFUSING THEM WAS THE BUG.
+   *
+   * This page used to hold one, called `viewer`, fetched from the id in the URL - and it chose
+   * which dashboard to render from THAT record's role. So the URL decided its own
+   * authorisation: anybody signed in could type an administrator's id into the address bar and
+   * be handed the administrator's screen, with every customer on it, a create form, and a
+   * delete button per row.
+   *
+   * Those are two different questions and only one of them is about permission:
+   *
+   *   me       - the SIGNED-IN customer, fetched from the id in sessionStorage. The only
+   *              authority on what this person may be shown. Nothing typed in the URL can
+   *              change it.
+   *   subject  - the customer whose accounts are on screen, from the id in the URL. Usually
+   *              the same person; different only when an administrator inspects somebody.
+   *
+   * The rule that falls out is the whole authorisation model of this page: you may view your
+   * own dashboard, and an administrator may view anybody's. A non-admin asking for somebody
+   * else's is returned to their own.
+   *
+   * SAME DEFECT CLASS AS THE ONE THE USER REPORTED, one layer deeper. Removing the /customers
+   * route closed a door while /dashboard/<admin-id> stayed ajar, because both mistakes came
+   * from the same habit - letting the address name the thing being read AND stand in for
+   * permission to read it. Worth remembering when adding the next route: the URL is an
+   * address. It is supplied by the person it is meant to constrain, so it can say WHAT is
+   * being asked for and never WHO is entitled to it.
+   */
+  const [me, setMe] = useState(null)
+  const [subject, setSubject] = useState(null)
 
   // arrays, not null: the first render happens before any data arrives and the lists below
   // would crash reading .length off null.
   const [accounts, setAccounts] = useState([])
   const [customers, setCustomers] = useState([])
 
-  // the three states kept apart, as CustomersPage keeps them. A blank screen means three
+  // the three states kept apart, as every loading screen in this app keeps them. A blank screen
   // different things and the user is entitled to know which: still asking, asked and failed,
   // asked and the answer is none. The third belongs to the list components; the first two
   // belong here.
@@ -156,11 +202,16 @@ export default function DashboardPage() {
    */
   const [signedInGone, setSignedInGone] = useState(false)
 
+  // set when a non-admin asks for somebody else's dashboard. State rather than a redirect
+  // issued from the async callback, for the same reason as signedInGone: the render turns it
+  // into a <Navigate>, which is the supported way to say "this resolves somewhere else".
+  const [denied, setDenied] = useState(false)
+
   /*
-   * WRAPPED IN useCallback, which CustomersPage's equivalent is not, and the difference is
+   * WRAPPED IN useCallback, which the simpler loaders in this app do not need, and the reason
    * forced by the dependency array. A function declared in a component body is a new object
    * every render, which is harmless when the effect that calls it depends on nothing.
-   * CustomersPage loads once on mount and passes []. This page cannot: it has to reload when
+   * A loader that runs once on mount passes []. This page cannot: it has to reload when
    * :id changes, or switching between two people would leave one person's balances under the
    * other's name. An effect with a real dependency array that also calls a freshly-built
    * function is either a lie about what it depends on or an infinite loop, depending on
@@ -168,29 +219,68 @@ export default function DashboardPage() {
    * suppression comment claiming the dependency does not matter.
    */
   const load = useCallback(async () => {
-    try {
-      // the role is a property of a record, so it has to be fetched before anything can be
-      // decided by it. Hence two phases rather than one Promise.all: what to request second
-      // genuinely depends on the first answer.
-      const loadedViewer = await getCustomer(id)
+    const signedInId = getSignedInId()
+    const viewingSelf = String(id) === String(signedInId)
 
-      if (isAdmin(loadedViewer)) {
-        // every account and every customer, in parallel - neither needs the other's answer to
-        // be sent. The customers are not only for the list further down: they are what turns
-        // an ownerless account row into a named one, and what fills the owner select on the
-        // open-account form.
+    try {
+      /*
+       * WHO I AM, FIRST AND SEPARATELY. Everything else follows from the answer.
+       *
+       * Its own try/catch so a 404 here is unambiguous: it can only mean the SIGNED-IN
+       * customer is gone, never the customer named in the URL. Folded into the outer catch
+       * the two would be indistinguishable whenever an admin inspects somebody else, and the
+       * handling for them is completely different - one signs you out, one is a bad address.
+       */
+      let loadedMe
+      try {
+        loadedMe = await getCustomer(signedInId)
+      } catch (err) {
+        if (err.status === 404) {
+          signOut()
+          setSignedInGone(true)
+          return
+        }
+        throw err
+      }
+
+      /*
+       * THE AUTHORISATION DECISION - taken here, from `me`, and taken BEFORE any of the
+       * subject's data is requested.
+       *
+       * Before, not after, is the point. A non-admin asking for somebody else's dashboard
+       * never causes a request for that person's accounts, so there is nothing fetched and
+       * nothing in memory to leak even if the redirect below were somehow missed. Deciding
+       * after the fetch would mean the data had already been handed to the browser.
+       *
+       * Still a product boundary and not a security one. GET /customers/{id}/accounts is
+       * served to any caller with no credential at all; this decides what THIS INTERFACE
+       * shows and stops nobody holding curl.
+       */
+      if (!isAdmin(loadedMe) && !viewingSelf) {
+        setDenied(true)
+        return
+      }
+
+      if (isAdmin(loadedMe) && viewingSelf) {
+        // the administrator's own dashboard: every account and every customer, in parallel -
+        // neither needs the other's answer to be sent. The customers are not only for the
+        // list further down: they are what turns an ownerless account row into a named one,
+        // and what fills the owner select on the open-account form.
         const [allAccounts, allCustomers] = await Promise.all([getAccounts(), getCustomers()])
+        setSubject(loadedMe)
         setAccounts(allAccounts)
         setCustomers(allCustomers)
       } else {
-        // a customer's dashboard asks only for their own accounts. Not a restriction - the
-        // endpoint that returns everyone's is one line away and would answer - simply the
-        // data this screen displays.
+        // a customer dashboard - either my own, or one an administrator is inspecting. Only
+        // that person's accounts, and no customer list at all: an admin looking at somebody
+        // else's dashboard is looking at THEIR screen, not carrying admin controls into it.
+        const loadedSubject = viewingSelf ? loadedMe : await getCustomer(id)
+        setSubject(loadedSubject)
         setAccounts(await getCustomerAccounts(id))
         setCustomers([])
       }
 
-      setViewer(loadedViewer)
+      setMe(loadedMe)
       // a successful load clears a previous failure, or a transient error sits on screen
       // contradicting the fresh data underneath it.
       setError(null)
@@ -219,17 +309,11 @@ export default function DashboardPage() {
        * also the harmless direction: the cost is retyping a password, where the cost of the
        * other choice is an app that cannot be recovered without DevTools.
        */
-      if (err.status === 404) {
-        if (String(id) === getSignedInId()) {
-          signOut()
-          setSignedInGone(true)
-          return
-        }
-        // not me - just a bad address. The signed-in visitor is fine and stays signed in.
-        setError(`No customer with id ${id}.`)
-      } else {
-        setError(err.message)
-      }
+      // reaching here, a 404 can only be about the SUBJECT - the signed-in customer's own
+      // fetch has its own catch above. So this is an administrator who typed an id, followed
+      // a stale link, or is looking at somebody another admin has just deleted. The visitor
+      // is fine and stays signed in.
+      setError(err.status === 404 ? `No customer with id ${id}.` : err.message)
     } finally {
       // the request is over either way, and the one thing worse than an error message is a
       // spinner that never stops.
@@ -241,7 +325,7 @@ export default function DashboardPage() {
     // the effect callback itself is NOT async: React reads an effect's return value as a
     // cleanup function and would try to call the promise an async function returns.
     //
-    // The suppression is a judgement, not a shrug, and CustomersPage documents it at length.
+    // The suppression is a judgement, not a shrug.
     // set-state-in-effect exists to catch a genuine loop - state set synchronously inside an
     // effect starts a render, which runs the effect, which sets state. An async function runs
     // synchronously only as far as its first await, and load() awaits before it touches
@@ -291,7 +375,7 @@ export default function DashboardPage() {
   /*
    * DELETING, and the 404 that is not a failure.
    *
-   * Both handlers follow the rule CustomersPage established: a 404 means someone else already
+   * Both handlers follow the same rule: a 404 means someone else already
    * deleted it, or this tab's list is stale. The outcome the user asked for is already true,
    * so it is not worth an error message - but the screen is provably wrong, which is exactly
    * why the refetch still runs.
@@ -318,55 +402,73 @@ export default function DashboardPage() {
     try {
       await deleteCustomer(customerId)
     } catch (err) {
+      /*
+       * THE LAST ADMINISTRATOR CANNOT BE DELETED, and this branch is the one place in this
+       * file where the server says no and means it.
+       *
+       * Worth being precise about why it is different in kind from everything else here. Every
+       * other restriction in this area is a PRODUCT boundary: the customer list is admin-only
+       * in this interface, and GET, POST and DELETE /customers answer any caller with no
+       * credential regardless. Removing a control removes it from people using the UI as
+       * intended and from nobody else.
+       *
+       * This one is an INVARIANT ABOUT SYSTEM STATE rather than a claim about the caller. "The
+       * bank must not end up with zero administrators" needs no idea who is asking, so it
+       * needs no authentication to enforce - and therefore it holds for curl exactly as it
+       * holds for this button. It is real, and it is real precisely because it does not depend
+       * on identity.
+       *
+       * The status is state-dependent - the same request succeeds once another admin exists -
+       * which is the same reasoning that makes a declined withdrawal a 409 rather than a 400.
+       * 400 is accepted too, in case the server expresses it that way, because a wrong guess
+       * here shows a bare "HTTP error! status: 409" for a refusal the user can actually act on.
+       *
+       * The message says what to DO. "Could not delete" would be true and useless; the reason
+       * is specific, the remedy is specific, and the remedy is unusual enough to be worth
+       * spelling out - there is no way to promote somebody through the API, so another
+       * administrator has to come from a seed or a database edit.
+       */
+      if (err.status === 409 || err.status === 400) {
+        setError(
+          'That is the only administrator, and the server will not leave the bank without one. '
+          + 'Another administrator must exist first - roles are set at seed time, so that means '
+          + 'a database change rather than anything in this interface.',
+        )
+        return
+      }
       if (err.status !== 404) {
         setError(err.message)
         return
       }
     }
-    // deleting the customer whose dashboard this is is not blocked, and the refetch handles
-    // it honestly: getCustomer 404s and the page says there is no customer with that id.
-    // Blocking it would be a permission-shaped guard on an API that would carry out the
-    // request regardless, which is the exact kind of theatre this app is avoiding.
+    // deleting the customer whose dashboard this is is not blocked here, and the refetch
+    // handles it honestly: getCustomer 404s, the page signs them out and returns them to the
+    // form. Blocking it in the client would be a permission-shaped guard on an API that would
+    // carry out the request regardless, which is the kind of theatre this app avoids - and the
+    // one case that genuinely must not happen, deleting the last admin, is refused by the
+    // server, which is where a refusal means something.
     load()
   }
 
   /*
-   * Changing somebody's role.
+   * THERE IS NO ROLE CONTROL, AND THAT IS NOW A REAL GUARANTEE RATHER THAN A HIDDEN ONE.
    *
-   * A PUT of the whole customer with one field replaced - the only update the API offers -
-   * and then a refetch, for the reason every other mutation on this page refetches: it costs
-   * a round trip and leaves the screen agreeing with the database. Here that matters more
-   * than usual, because the customer being edited may be the one whose dashboard this is, and
-   * demoting yourself should visibly change the page you are standing on rather than leaving
-   * an admin dashboard rendered for somebody who is no longer an admin.
+   * This page used to carry handleRoleChange, and the admin dashboard a per-row selector. Both
+   * are gone, because PUT /api/v1/customers/{id} no longer reads a role from the body - it
+   * replaces username and fullName and nothing else. The field is server-owned, alongside id,
+   * password and accountIds.
    *
-   * Which is allowed, and deliberately not guarded. Blocking an admin from changing their own
-   * role would be a permission-shaped check on an operation the API grants to anyone, and the
-   * refetch handles the outcome honestly: the page re-renders as the customer dashboard.
+   * So the control was removed for a different reason than the last two times something like
+   * it was removed. It would have gone through, returned 200, changed nothing, and refetched a
+   * list showing the old role. A control that appears to work and silently does not is worse
+   * than no control: it teaches the operator that the system is lying rather than that the
+   * operation is unavailable.
    *
-   * THE 400 BRANCH used to be the one to watch, because a PUT could not supply the write-only
-   * password and might have been rejected for it. That is settled - the server preserves the
-   * stored password when the body omits it - so a 400 here now means what a 400 should mean:
-   * the body was genuinely malformed. The branch stays, because the server names no field and
-   * a bare "Invalid request." on a control the user did not type into is worth more words
-   * than that.
+   * WHAT IT COSTS, because this is a genuine trade rather than a free win: there is now NO WAY
+   * to make a second administrator through the API. Roles are assigned at seed time. Promoting
+   * somebody means a database edit or a code change and a redeploy. That is the price of the
+   * guarantee, and it was paid deliberately.
    */
-  const handleRoleChange = async (customer, role) => {
-    try {
-      await setCustomerRole(customer, role)
-    } catch (err) {
-      if (err.status === 400) {
-        setError('The server rejected the role change as an invalid request.')
-      } else if (err.status !== 404) {
-        // 404 means somebody else deleted them, so the record this was editing is gone. The
-        // refetch below is what puts the screen right; an error about it would be describing
-        // a customer that no longer exists.
-        setError(err.message)
-      }
-      // falls through to the refetch either way - the list on screen is provably stale now.
-    }
-    load()
-  }
 
   /*
    * The signed-in customer no longer exists, and signOut has already run. Redirecting from the
@@ -387,50 +489,89 @@ export default function DashboardPage() {
     )
   }
 
+  /*
+   * A non-admin asked for somebody else's dashboard. Back to their own, without a message.
+   *
+   * The only way to arrive here is by typing an address - nothing in the interface links one
+   * customer to another's dashboard. Announcing "you may not view that" would also overstate
+   * what happened: nothing was refused by anything that could refuse it, and the same data is
+   * one unauthenticated request away. This is not a screen anybody is forbidden from; it is a
+   * screen that is not theirs, and being returned to the one that is says that accurately.
+   */
+  if (denied) {
+    return <Navigate to={`/dashboard/${getSignedInId()}`} replace />
+  }
+
   // failed with nothing to show. Distinct from loading, and it gets a way out: this is a
   // screen reached by following a stale link or typing an id, so a dead end is the wrong
   // answer. EditCustomerPage does the same thing for the same reason.
-  if (error && !viewer) {
+  if (error && !subject) {
     return (
       <section>
         <p className="error">{error}</p>
-        <p><Link to="/dashboard">Choose someone to view as</Link></p>
+        <p><Link to="/dashboard">Back to your dashboard</Link></p>
       </section>
     )
   }
 
+  /*
+   * THE NO-LEAK GUARANTEE FOR THE ADMIN SURFACE, and it is this line rather than anything
+   * cleverer.
+   *
+   * `loading` starts true, so the FIRST thing this component ever returns is this. Neither
+   * dashboard is in the returned tree until the signed-in customer's role has arrived, which
+   * means AdminDashboard cannot mount, cannot run an effect, and cannot put a customer list
+   * into the DOM before the decision that gates it has been made.
+   *
+   * This page deliberately does not use RequireAdmin, and this is why it does not need to:
+   * /dashboard/:id serves administrators and customers both, so there is no admin-only route
+   * to wrap. Same discipline, resolved one level in.
+   */
   if (loading) {
     return <p>Loading...</p>
   }
 
+  // the admin surface is shown when the SIGNED-IN customer is an administrator AND is looking
+  // at their own dashboard. An admin inspecting somebody else gets that person's screen, not
+  // their own controls pointed at another person's data.
+  const showAdmin = isAdmin(me) && String(id) === String(getSignedInId())
+
   return (
     <section>
       <h1>
-        {isAdmin(viewer) ? 'Administrator dashboard' : 'Customer dashboard'}
+        {showAdmin ? 'Administrator dashboard' : 'Customer dashboard'}
       </h1>
 
-      <NoAuthNotice />
 
       {/* said plainly and near the top, because the whole page is about one person and the
-          URL is the only other place that says which. */}
+          URL is the only other place that says which. Two lines when they differ, because
+          "signed in as" and "looking at" being the same person is the normal case and worth
+          not cluttering. */}
       <p>
-        Viewing as <strong>{viewer.fullName}</strong>{' '}
+        Signed in as <strong>{me.fullName}</strong>{' '}
         {/* roleOf, not "admin or else customer". A record written before the field existed
             has NO role, and printing "customer" for it would state something the data does
             not say. It still gets the customer dashboard - roleOf('') is not 'admin' - and
             the difference between having that role and merely not having the other one is
             worth one span. */}
         <span className="muted">
-          ({roleOf(viewer) || 'no role set'})
+          ({roleOf(me) || 'no role set'})
         </span>
       </p>
+
+      {me.id !== subject.id && (
+        <p>
+          Viewing the accounts of <strong>{subject.fullName}</strong>{' '}
+          <span className="muted">(customer {subject.id})</span>
+        </p>
+      )}
 
       {/* a failure AFTER a successful first load - a refetch that could not reach the server.
           The tables below are still on screen and are now possibly stale, which is exactly
           why this says so rather than silently leaving old numbers up. */}
       {error && <p className="error">{error}</p>}
 
-      {isAdmin(viewer)
+      {showAdmin
         ? (
           <AdminDashboard
             accounts={accounts}
@@ -438,7 +579,6 @@ export default function DashboardPage() {
             ownerOf={ownerOf}
             onDeleteAccount={handleDeleteAccount}
             onDeleteCustomer={handleDeleteCustomer}
-            onRoleChange={handleRoleChange}
             onChanged={load}
           />
         )
@@ -448,7 +588,7 @@ export default function DashboardPage() {
           // have done more to it than this one transaction; a balance the client worked out
           // for itself is a second source of truth for the one number that must not have one.
           <CustomerDashboard
-            customer={viewer}
+            customer={subject}
             accounts={accounts}
             onCompleted={load}
           />

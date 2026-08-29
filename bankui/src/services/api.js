@@ -11,8 +11,8 @@
  *
  * What it buys, concretely:
  *   - The base path is written once. When the API moves to /api/v2, one line changes.
- *   - Components stop containing transport code. CustomersPage says getCustomers(); it does
- *     not know whether that is fetch, axios, or a WebSocket.
+ *   - Components stop containing transport code. A page says getCustomers(); it does not
+ *     know whether that is fetch, axios, or a WebSocket.
  *   - The rules that are easy to forget - fetch not rejecting on 500, the Content-Type
  *     header Spring needs to avoid a 415 - are enforced in one place rather than remembered
  *     at each call site.
@@ -102,8 +102,8 @@ const jsonRequest = (method, data) => ({
 
 /*
  * The public surface. One function per API operation, named for what it does rather than for
- * the verb it uses - readers of CustomersPage care that a customer is being created, not
- * that a POST is involved.
+ * the verb it uses - a reader cares that a customer is being created, not that a POST is
+ * involved.
  *
  * This list is also documentation: it is the complete set of things this front end can ask
  * the back end to do. When Phase 13 adds filter/search, the gap shows up here first.
@@ -116,29 +116,107 @@ const jsonRequest = (method, data) => ({
  * server byte for byte - read from the model rather than guessed, because a case mismatch on
  * an enum surfaces as an unexplained 400 rather than as anything that names the field.
  *
- * The field is @NotNull, so it is not optional on the way out: a POST or PUT of a customer
- * without one is rejected. That is why the two customer functions below map their argument
- * rather than passing it through, which they used to do.
+ * READ ONLY, AND THAT IS NOW A REAL GUARANTEE. There is no function in this module that sets
+ * a role, because there is no endpoint that accepts one:
  *
- * WHAT THIS IS NOT. It is not a permission, and nothing built on it is a security boundary.
- * There is no authentication in this application: no login, no session, no token, no
- * principal. The API serves every endpoint, including every DELETE, to anyone who asks. Role
- * is a fact ABOUT a customer record, exactly like fullName - it says what kind of customer
- * this is, and the UI uses it to decide which screen is useful. It decides nothing about what
- * is allowed, because the front end is not in a position to decide that and cannot be: it
- * runs on hardware the user controls, and curl does not run this code. Role.java on the
- * server makes the same argument, unprompted and at greater length; LoginPage.jsx makes it
- * for the client. Both are worth reading before extending any of this.
+ *   POST /api/v1/customers  takes username, password and fullName. The server assigns the id
+ *                           and forces the role to CUSTOMER.
+ *   PUT  /api/v1/customers/{id}  replaces username and fullName. Role is server-owned, beside
+ *                           id, password and accountIds, and a role in the body is ignored.
+ *
+ * So: NO CALLER, THROUGH ANY ENDPOINT, CAN CHANGE ANY CUSTOMER'S ROLE. Not this UI, not curl,
+ * not anybody. This module used to carry a careful distinction - registration cannot mint an
+ * administrator, but the API can, via PUT - and that distinction is now dead. Both halves are
+ * closed. Administrators exist only because a seed created them.
+ *
+ * WHAT IT COSTS, because it is a real trade and not a free win: making a second administrator
+ * requires a database edit or a code change and a redeploy. There is deliberately no endpoint
+ * for it. That price was paid knowingly in exchange for a guarantee that needs no
+ * authentication to hold.
+ *
+ * ==========================================================================================
+ * TWO CATEGORIES, AND THEY MUST NOT BE CONFUSED
+ * ==========================================================================================
+ *
+ * This file describes both kinds of restriction, and a reader has to be able to tell at a
+ * glance which is which, because only one of them survives contact with curl.
+ *
+ *   ENFORCED - a fact about SYSTEM STATE, needing no idea who is asking, so it holds for every
+ *   caller. Four of them exist: no role can be changed by anyone; the last remaining
+ *   administrator cannot be deleted; an account cannot be taken past its overdraft floor; a
+ *   username cannot be duplicated. None requires a principal, which is exactly why all four
+ *   are real while there is no authentication - each is a rule about what the DATA may look
+ *   like, never about who may touch it.
+ *
+ *   NOT ENFORCED - a PRODUCT boundary in this interface only. The customer list, the create
+ *   form and the delete button are admin-only HERE; the sign-in gate and the choice of which
+ *   dashboard you are routed to are decided HERE. GET, POST and DELETE /customers answer any
+ *   caller with no credential at all. Removing a control removes it from people using the UI
+ *   as intended and from nobody else.
+ *
+ * Role is still, in itself, a fact ABOUT a record rather than a permission - the UI reads it to
+ * decide which screen is useful, and that decision is not enforcement. What changed is that the
+ * VALUE can no longer be tampered with, which makes the UI's reading of it trustworthy in a way
+ * it was not before.
+ *
+ * ==========================================================================================
+ * ACCOUNTS ARE NOT COVERED BY ANY OF THIS - THE LARGEST GAP IN THE SYSTEM
+ * ==========================================================================================
+ *
+ * Everything above concerns CUSTOMER records. Do not carry any of it across to accounts, and
+ * do not let the customer-side gating suggest accounts received the same treatment. They did
+ * not, by a wide margin.
+ *
+ * THE ACCOUNT ENDPOINTS HAVE NO OWNERSHIP CHECK AT ALL. Not a weak one - none. Every account
+ * route takes an account id and acts on it, and not one of them asks whose account it is:
+ *
+ *   GET    /api/v1/accounts             every account in the bank, to anyone
+ *   GET    /api/v1/accounts/{id}        any account's balance, to anyone
+ *   POST   /api/v1/accounts/{id}/deposit
+ *   POST   /api/v1/accounts/{id}/withdraw   MOVES MONEY, for anyone, on any account
+ *   DELETE /api/v1/accounts/{id}
+ *
+ * Verified live rather than inferred: POST /api/v1/accounts/101/withdraw?amount=400 with no
+ * credential of any kind returned 200 and took that balance from 500 to 100.
+ *
+ * So a customer dashboard headed "Your accounts" is a display convention and nothing more. The
+ * withdraw button in TransactionForm is not a privileged operation this UI happens to expose;
+ * it is an open endpoint this UI happens to call.
+ *
+ * IT CANNOT BE CLOSED FROM HERE, and not merely because this is the client. It differs in KIND
+ * from the four enforced rules above. Each of those is a statement about the data - "no
+ * zero-admin state", "no balance below the floor" - checkable by looking only at what is being
+ * written. "This is your account" is not: it is a statement about the CALLER, and there is no
+ * caller to inspect. Enforcing it requires an authenticated principal, which arrives in phase
+ * 10. That is precisely why this gap outlived the customer-side ones - those were reachable
+ * without authentication and this one is not.
+ *
+ * ==========================================================================================
+ * WHY NONE OF THIS IS ON THE SCREEN ANY MORE
+ * ==========================================================================================
+ *
+ * A NoAuthNotice component used to render above the sign-in form, the register page and both
+ * dashboards, saying in plain language that signing in gates what is displayed rather than what
+ * is permitted. It has been deleted at the user's instruction, and the reasoning is theirs
+ * rather than inferred: this is a demonstration application, the same information is recorded
+ * in the commit message, and authentication and authorisation were covered only in passing on
+ * the course rather than as lab work. They are deploying without them deliberately, which is a
+ * legitimate decision to take knowingly - and taking it knowingly is the whole difference.
+ *
+ * ONLY THE USER-FACING HALF WAS RETIRED. These comments are the maintainer-facing half and they
+ * stay. The distinction between the two categories above is the most useful thing in this
+ * module, and it is worth more to the next person reading the code than the banner ever was to
+ * a visitor. Do not reintroduce the notice as a footnote, a tooltip or a muted line - removal
+ * was the instruction, not softening. Do not delete these comments either.
  *
  * TWO VOCABULARIES, and the translation between them lives here and nowhere else. The wire
  * speaks in enum constants - "ADMIN" - and the UI speaks in words - "admin" - for the same
  * reason AccountType does: a constant is correct in a payload and shouty in a sentence.
  * Everything above the api module uses the lowercase form.
+ *
+ * The ROLES list that used to sit here is gone with the selector it fed. A list of values a
+ * form may offer is dead weight once nothing may offer them.
  */
-
-// the roles this UI knows about, in the order a form should offer them. Least surprising
-// first, which is also the one a new customer should get by default.
-export const ROLES = ['customer', 'admin']
 
 /*
  * The role, lowercased, or the EMPTY STRING when the record does not have one.
@@ -188,7 +266,7 @@ export const accountIdsOf = (customer) => customer?.accountIds ?? []
  * ==========================================================================================
  *
  * It used to be { ...customer, role }, which sent back whatever happened to be on the object.
- * It now lists four fields, because the server has a rule about which ones a PUT replaces and
+ * It now lists three fields, because the server has a rule about which ones a PUT replaces and
  * the rule is worth encoding rather than approximating:
  *
  *   PUT FULLY REPLACES THE FIELDS A CLIENT BOTH READS AND OWNS.
@@ -199,9 +277,9 @@ export const accountIdsOf = (customer) => customer?.accountIds ?? []
  *
  * Run the two halves over every field on a customer and the whole contract falls out:
  *
- *   id, username, fullName - read and owned. Replaced. They are here.
- *   role                   - read and owned. Replaced, which is why changing a role is a PUT
- *                            like any other edit and no PATCH endpoint was added for it.
+ *   id, username, fullName - read and owned. Replaced. They are here. (id is here because the
+ *                            controller rejects a body whose id disagrees with the path, not
+ *                            because it is editable.)
  *   password               - FAILS THE READ HALF. It is WRITE_ONLY, so no client has ever
  *                            seen one and none can send one back. The server preserves the
  *                            stored value when the body omits it, so omitting it is now
@@ -211,6 +289,12 @@ export const accountIdsOf = (customer) => customer?.accountIds ?? []
  *                            customer-shaped PUT has no idea what it would be overwriting.
  *                            The server takes this list from the stored document and ignores
  *                            the body.
+ *   role                   - ALSO FAILS THE OWN HALF, and this one moved. It used to be read
+ *                            and owned, and was replaced like any other field, which meant any
+ *                            caller could PUT themselves to ADMIN. It is now server-owned:
+ *                            assigned at seed time, ignored in every request body, changeable
+ *                            through no endpoint at all. So it is not sent, and there is no
+ *                            function in this module that would send it.
  *
  * THE ECHO IS GONE. This function used to forward accountIds untouched, which was the safer
  * of the two options while PUT still replaced the field - omitting it would have nulled the
@@ -231,7 +315,6 @@ const toWireCustomer = (customer) => ({
   id: customer.id,
   username: customer.username,
   fullName: customer.fullName,
-  role: String(customer.role ?? '').toUpperCase(),
 })
 
 /*
@@ -255,15 +338,20 @@ const toWireCustomer = (customer) => ({
  * the body, from anybody. The capability is not hidden, it is gone from the create path, and
  * it is gone where such things have to be: on the server.
  *
- * BUT ONLY FROM THE CREATE PATH, and this limit must not be lost. PUT /api/v1/customers/{id}
- * still accepts a role from any caller with no credential - that is the deliberate UI-only
- * gating decision recorded on setCustomerRole, unchanged. So anybody may register an ordinary
- * account and then promote it to ADMIN with a single PUT.
+ * AND THE UPDATE PATH CLOSED TOO, which retires a distinction this module carried for a while.
+ * It used to say - accurately - that only the CREATE path was closed, because
+ * PUT /api/v1/customers/{id} still accepted a role from any caller, so anybody could register
+ * an ordinary account and promote it with a single PUT. That is no longer possible: PUT
+ * replaces username and fullName, and role is server-owned.
  *
- *   "Registration cannot mint an administrator" is TRUE.
- *   "The API cannot mint an administrator" is FALSE.
+ * So the accurate statement is now the simpler and stronger one:
  *
- * Nothing in this module or in any UI copy above it may imply the second.
+ *   NO CALLER, THROUGH ANY ENDPOINT, CAN CHANGE ANY CUSTOMER'S ROLE.
+ *
+ * Administrators exist only because a seed created them, and making another means a database
+ * edit or a code change - there is deliberately no endpoint for it. That is the cost, and it
+ * bought a guarantee that needs no authentication to hold, which is the only kind available
+ * before phase 10.
  *
  * NAMED, NOT SPREAD, for the reason toWireCustomer learned the hard way. A spread sends
  * whatever the caller's object happens to be carrying, and here that would be actively wrong:
@@ -363,6 +451,13 @@ export const getCustomerAccounts = (id) => request(`/customers/${id}/accounts`).
 
 /*
  * DEPOSIT AND WITHDRAW, and the third outcome.
+ *
+ * FIRST, THE THING THAT IS NOT OBVIOUS FROM HERE: these endpoints have NO OWNERSHIP CHECK.
+ * Neither takes a customer id, and the server never asks whose account it is - any caller,
+ * with no credential, can move money in or out of any account by id. Verified live, not
+ * inferred. The overdraft floor below IS enforced for everyone; who is asking is not checked
+ * at all. See "ACCOUNTS ARE NOT COVERED BY ANY OF THIS" at the top of this file before
+ * concluding anything about these two being protected.
  *
  * These resolve to a BOOLEAN, and it is the same boolean Account.withdraw() returns in the
  * Java: "did the account's rules allow it", not "did it work". A savings account refusing to
@@ -570,31 +665,19 @@ export async function signIn(username, password) {
 }
 
 /*
- * Change one customer's role.
+ * THERE IS NO setCustomerRole, AND ITS ABSENCE IS THE FEATURE.
  *
- * A PUT, and no longer with any misgivings about it. This function used to carry a warning
- * that it might be sending a body the server would reject, and a suggestion that a dedicated
- * PATCH /customers/{id}/role would express the operation better. Both are resolved:
+ * There was one. It PUT the whole customer with the role replaced, and it carried a long
+ * comment insisting - correctly at the time - that the admin-only placement of the control
+ * that called it was a decision about screen layout and NOT enforcement, since the API took a
+ * role change from any caller with no credential.
  *
- *   The password question is closed. PUT preserves the stored password when the body omits
- *   one, which is what toWireCustomer now does deliberately rather than by necessity.
+ * The API stopped taking one. PUT replaces username and fullName; role is server-owned. So the
+ * function was deleted rather than left to send a field that would be ignored: a client
+ * function whose request has no effect is worse than a missing one, because it returns 200 and
+ * every caller believes it.
  *
- *   PATCH was CONSIDERED AND DECLINED, not overlooked, and the reasoning is better than the
- *   suggestion was. A role is a field a client both reads and owns, which is precisely the
- *   set PUT replaces - so a role change is an ordinary edit and needs no special endpoint.
- *   The fields that seemed to argue for one, password and accountIds, are outside that set
- *   and are handled by being left out of the body entirely. Adding a verb per field would
- *   have solved by proliferation what the rule solves by definition.
- *
- * The spread is safe now that toWireCustomer names its fields: whatever else the caller's
- * customer object happens to be carrying - an accountIds list from the admin dashboard's
- * table, say - is dropped on the way out rather than sent and ignored.
- *
- * IT IS NOT A PERMISSION CHECK, and no code path in this app makes it one. The control that
- * calls this appears only on the admin dashboard, which is a decision about which screen the
- * operation belongs on. The API accepts a role change from any caller, with no credential,
- * and will continue to. Hiding the control hides it from people using the UI as intended and
- * from nobody else.
+ * There is deliberately no replacement, and no PATCH /customers/{id}/role either - that was
+ * considered and declined rather than overlooked. Roles are assigned at seed time. Promoting
+ * somebody means a database edit or a code change, which is the price of the guarantee.
  */
-export const setCustomerRole = (customer, role) =>
-  updateCustomer(customer.id, { ...customer, role })

@@ -28,6 +28,12 @@ export default function EditCustomerPage() {
   const [form, setForm] = useState(null)
   const [message, setMessage] = useState(null)
 
+  // held OUTSIDE form, deliberately. `form` is the body of the PUT, and role is not part of
+  // that body any more - the server owns it. Keeping it in a separate variable is what makes
+  // "shown but not sent" true by construction rather than by a filter somebody has to
+  // remember when building the request.
+  const [role, setRole] = useState('')
+
   useEffect(() => {
     const loadCustomer = async () => {
       try {
@@ -57,22 +63,25 @@ export default function EditCustomerPage() {
          *              deliberately, and this paragraph is what makes the absence readable as
          *              a decision rather than an oversight.
          *
-         * ROLE is translated on the way in, and it is the one field that could not be loaded
-         * raw. Two problems, one call. The wire spells it "CUSTOMER" while this page renders
-         * the word, so an untranslated value would read as shouting. And customers written
-         * before the field existed come back with role: null, which would make the value below
-         * null - and a form value of null is how React decides an input is UNcontrolled, after
-         * which it warns the moment a real value arrives. roleOf returns '' for an absent role,
-         * which is a string, so the field is controlled from the first render, and '' stays
-         * distinguishable from 'customer' - which is what stops a save from inventing a role
-         * nobody chose.
+         *   role       joined them. It used to be loaded, held, and PUT back, because it was a
+         *              field a client both read and owned. It is server-owned now: PUT replaces
+         *              username and fullName and nothing else, and a role in the body is
+         *              ignored. So it is not in this state at all - carrying a value the save
+         *              cannot affect would only invite somebody to add a control for it.
+         *
+         *              It is still SHOWN further down, read from the loaded customer rather
+         *              than from form state, because whose record this is and what kind of
+         *              customer they are is worth seeing while editing their name.
+         *
+         * What is left is exactly what a PUT replaces, so the state and the request are the
+         * same three fields by construction rather than by remembering to keep them in step.
          */
         setForm({
           id: customer.id,
           username: customer.username,
           fullName: customer.fullName,
-          role: roleOf(customer),
         })
+        setRole(roleOf(customer))
       } catch (err) {
         // 404 is a real, expected answer here - someone typed an id that does not exist, or
         // followed a stale link. it deserves its own message, not the generic status text.
@@ -103,32 +112,28 @@ export default function EditCustomerPage() {
     event.preventDefault()
 
     /*
-     * A customer written before roles existed has none, and the server now requires one. This
-     * page cannot set one - role editing lives on the admin dashboard and nowhere else - so
-     * it refuses the save and says where the fix is.
+     * THERE IS NO ROLE GUARD HERE ANY MORE, and its removal is a fix rather than a relaxation.
      *
-     * Substituting the ordinary role here would be the tempting one line, and it would be
-     * wrong twice over: it would assign a value the user never chose, on a field they cannot
-     * even see, as a side effect of editing their full name - and it would do it silently to
-     * precisely the records nobody has looked at recently. Sending it anyway and letting the
-     * 400 come back would be honest but useless, because the server does not name the
-     * offending field and the message would be "Invalid request." for a form where exactly
-     * one field is at fault and the UI already knows which.
+     * This used to refuse the save when a customer had no role, because role was part of the
+     * PUT body and the server required one - so a record predating the field could not be
+     * edited at all until somebody set it. The remedy it pointed at, a selector on the admin
+     * dashboard, no longer exists either.
+     *
+     * Role is server-owned now and is not in the body, so a missing one cannot fail a save,
+     * and blocking one would strand exactly the records nobody has looked at recently:
+     * unable to edit a name because of a field this form does not send.
      */
-    if (form.role === '') {
-      setMessage('This customer has no role. An administrator can set one from their dashboard.')
-      return
-    }
-
     try {
       // form still carries the id it was loaded with, and it must: the controller rejects a
       // body whose id disagrees with the path. not offering an input for it is what keeps
       // those two in agreement.
       await updateCustomer(id, form)
-      // navigating away IS the success message. CustomersPage mounts fresh on arrival, so
-      // its effect refetches and the list already shows the new values - no callback needed
-      // here, unlike the create form.
-      navigate('/customers')
+      // navigating away IS the success message. The dashboard mounts fresh on arrival, so its
+      // effect refetches and the customer list already shows the new values - no callback
+      // needed here, unlike the create form. /dashboard rather than the old /customers, which
+      // no longer exists: only an administrator can reach this page, so "back" is their
+      // dashboard, which is where the list they came from lives.
+      navigate('/dashboard')
     } catch (err) {
       if (err.status === 400) {
         setMessage('Invalid request.')
@@ -151,7 +156,7 @@ export default function EditCustomerPage() {
     return (
       <>
         <p className="error">{message}</p>
-        <Link to="/customers">Back to list</Link>
+        <Link to="/dashboard">Back to the dashboard</Link>
       </>
     )
   }
@@ -179,23 +184,22 @@ export default function EditCustomerPage() {
           <input type="text" name="fullName" value={form.fullName} onChange={handleChange} />
         </label>
 
-        {/* SHOWN, NOT EDITABLE, and there is no control here at all - not a disabled one.
-            Role changes belong on the administrator dashboard, which is the screen that is
-            about administering other people's records; this page is about a customer's own
-            details and is reachable from the ordinary customer list.
+        {/* SHOWN, NOT EDITABLE, and no control at all - not even a disabled one.
 
-            To be exact about what that separation is: it is a decision about which screen an
-            operation belongs on. It is NOT enforcement. The API accepts a role change from
-            any caller with no credential, and moving the control does not alter that by one
-            byte. The value still round-trips through this form's state and back out in the
-            PUT, so saving a name does not silently clear a role.
+            This used to say that role changes belonged on the administrator dashboard, and
+            that the separation was a decision about screen layout rather than enforcement,
+            since the API accepted a role change from any caller. Both halves are now out of
+            date: there is no control on the dashboard either, because no endpoint accepts a
+            role. It is assigned at seed time and changeable through nothing.
 
-            A disabled <select> was the alternative and reads worse: it implies the choice
-            exists here and is currently unavailable to you, which is a claim about permission
-            - the exact impression this whole app is trying not to give. */}
+            A disabled <select> would still be the wrong shape, and now for a stronger reason
+            than before. Disabled implies "not available to you" - a claim about permission.
+            The truth is "not available to anybody, through any interface", which is not a
+            permission at all but a property of the system, and plain text says it without
+            implying somebody else could. */}
         <p>
-          Role: <strong className="capitalise">{form.role || 'not set'}</strong>{' '}
-          <span className="muted">&mdash; changed from the administrator dashboard.</span>
+          Role: <strong className="capitalise">{role || 'not set'}</strong>{' '}
+          <span className="muted">&mdash; set when the account was created; no endpoint changes it.</span>
         </p>
 
         {/* NO PASSWORD FIELD, deliberately. The server marks it write-only, so the customer
@@ -217,7 +221,7 @@ export default function EditCustomerPage() {
 
       {message && <p className="message">{message}</p>}
 
-      <p><Link to="/customers">Back to list</Link></p>
+      <p><Link to="/dashboard">Back to the dashboard</Link></p>
     </>
   )
 }

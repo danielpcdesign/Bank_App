@@ -49,15 +49,21 @@ import { createCustomer } from '../services/api.js'
  * is the only place a restriction can exist. Same for the id: there is no field to send, so
  * there is nothing for a form to offer.
  *
- * THE LIMIT, WHICH MUST NOT BE OVERSTATED. This closes the CREATE path only.
- * PUT /api/v1/customers/{id} still accepts a role from any caller with no credential - the
- * deliberate UI-only gating decision recorded on setCustomerRole, unchanged. Anybody may
- * register an ordinary account and then promote it with a single PUT.
+ * THIS USED TO CLOSE THE CREATE PATH ONLY, and the comment here said so at length: PUT
+ * /api/v1/customers/{id} still took a role from any caller, so anybody could register an
+ * ordinary account and promote it with a single PUT. That hole is closed too. PUT replaces
+ * username and fullName; role is server-owned alongside id, password and accountIds.
  *
- *   "Registration cannot mint an administrator" is TRUE.
- *   "The API cannot mint an administrator" is FALSE.
+ * So the statement is now simpler and stronger: NO CALLER, THROUGH ANY ENDPOINT, CAN CHANGE
+ * ANY CUSTOMER'S ROLE. Administrators exist only because a seed created them. The cost, which
+ * is real: making another one means a database edit or a code change, because there is
+ * deliberately no endpoint for it.
  *
- * Nothing here, and no copy on screen, may imply the second.
+ * KEEP THE TWO CATEGORIES APART, because this file now describes both. Roles being unchangeable
+ * is ENFORCED - it is a fact about system state, needs no idea who is asking, and therefore
+ * holds for curl exactly as it holds here. The customer list being admin-only is NOT: GET, POST
+ * and DELETE /customers still answer any caller with no credential, and that restriction lives
+ * in this interface alone.
  *
  * Controlled inputs, as everywhere else in this app: an <input> can hold its own value in the
  * DOM, and React would then have no idea what the user typed. A controlled input takes its

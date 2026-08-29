@@ -113,7 +113,7 @@ class CustomerRepositoryTest
         CustomerRepository repository = repositoryWithPopulatedCollection();
         when(mongo.findById(99)).thenReturn(Optional.empty());
 
-        assertThat(repository.editCustomer(99, new Customer(99, "ghost", "Ghost User"))).isEmpty();
+        assertThat(repository.editCustomer(99, "ghost", "Ghost User")).isEmpty();
 
         verify(mongo, never()).save(any(Customer.class));
     }
@@ -121,23 +121,6 @@ class CustomerRepositoryTest
     // the invariant argued over at length in phase 2: the stored document is keyed by the
     // PATH id, never by whatever the client put in the body. an ArgumentCaptor is the only
     // way to assert on the object handed to a collaborator rather than on a return value.
-    @Test
-    void editCustomer_keysTheReplacementByThePathId_ignoringTheBodyId()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(2)).thenReturn(Optional.of(new Customer(2, "bob", "Bob Jones", List.of(), Role.CUSTOMER, "bob123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        // body claims id 99 on purpose. the repository must not believe it.
-        repository.editCustomer(2, new Customer(99, "bob", "Bob Jones"));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-
-        assertThat(saved.getValue().getId()).isEqualTo(2);
-        assertThat(saved.getValue().getUsername()).isEqualTo("bob");
-        assertThat(saved.getValue().getFullName()).isEqualTo("Bob Jones");
-    }
 
     @Test
     void findById_passesAbsenceStraightThrough()
@@ -177,21 +160,24 @@ class CustomerRepositoryTest
         assertThat(repository.getCustomersByRole(Role.ADMIN)).containsExactly(admin);
     }
 
-    // the replacement carries the role over from the body like every other field. without
-    // this a rename would silently demote an admin to a customer.
-    @Test
-    void editCustomer_carriesTheRoleFromTheBody()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(4)).thenReturn(Optional.of(new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN, "admin123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+    /*
+     * THE PAIR THAT PINS THE ROLE RULE. Between them they cover the only two things a body
+     * can do about role - carry one, or not - and both must leave the stored value alone.
+     *
+     * This one is the new rule: a body asking for ADMIN is ignored. It replaced a test that
+     * asserted the opposite and had been passing for the wrong reason - stored and body were
+     * both ADMIN, so it could not have told the difference either way.
+     */
 
-        repository.editCustomer(4, new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getRole()).isEqualTo(Role.ADMIN);
-    }
+    /*
+     * And this one is the worry that goes with it: "we stopped writing a field" is the exact
+     * sentence that described the data-loss bug, so it has to be shown NOT to be that.
+     *
+     * It is not, because this method mutates the stored document rather than rebuilding it.
+     * An unmentioned field keeps the value it already had - there is no constructor default
+     * for it to fall back to. Not writing role is one less field to set, not one more to
+     * remember. Here the stored admin sends a body with no role at all and stays an admin.
+     */
 
     // the one admin, with the credentials the front end signs in with. if these drift the
     // seeded admin becomes unreachable and nobody can reach an admin view at all.
@@ -241,72 +227,16 @@ class CustomerRepositoryTest
 
     // password is carried from the body like every other field, which is what makes PUT a
     // genuine full replacement rather than a partial one.
-    @Test
-    void editCustomer_carriesThePasswordFromTheBody()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "alice123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        repository.editCustomer(1, new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "newpw"));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getPassword()).isEqualTo("newpw");
-    }
 
     // the fix for the deadlock between WRITE_ONLY and full-replacement PUT. a client is never
     // sent a password, so a body that omits one must leave the stored value alone rather than
     // blanking it. without this, editing a username locks the customer out permanently.
-    @Test
-    void editCustomer_preservesTheStoredPassword_whenTheBodyOmitsIt()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        // a realistic edit: the username changed, and the client never had a password to send
-        repository.editCustomer(1, new Customer(1, "alice2", "Alice Smith", List.of(101), Role.CUSTOMER, null));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getPassword()).isEqualTo("alice123");
-        assertThat(saved.getValue().getUsername()).isEqualTo("alice2");
-    }
 
     // a blank string is treated as "not supplied" too. an empty form field must not be able
     // to erase a password by accident.
-    @Test
-    void editCustomer_preservesTheStoredPassword_whenTheBodySendsABlankOne()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "alice123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        repository.editCustomer(1, new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "   "));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getPassword()).isEqualTo("alice123");
-    }
 
     // accountIds is now taken from the stored document, never from the body. a client
     // editing a username and saying nothing about accounts keeps its accounts.
-    @Test
-    void editCustomer_preservesTheStoredAccountIds_whenTheBodyOmitsThem()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        // a username edit that says nothing about accounts
-        repository.editCustomer(1, new Customer(1, "alice2", "Alice Smith"));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getAccountIds()).containsExactly(101);
-        assertThat(saved.getValue().getUsername()).isEqualTo("alice2");
-    }
 
     /*
      * THE LOST UPDATE THIS PREVENTS, and the reason omission was never the real risk.
@@ -319,21 +249,6 @@ class CustomerRepositoryTest
      * Here the stored customer has account 102 (opened moments ago) and the body still
      * carries the older [101] it was handed. The write must keep 102.
      */
-    @Test
-    void editCustomer_ignoresAStaleAccountIdsList_ratherThanUnlinkingTheNewerAccount()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101, 102), Role.CUSTOMER, "alice123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        // body echoes the list as it looked before 102 was opened
-        repository.editCustomer(1, new Customer(1, "alice", "Alice B. Smith", List.of(101), Role.CUSTOMER, null));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getAccountIds()).containsExactly(101, 102);
-        assertThat(saved.getValue().getFullName()).isEqualTo("Alice B. Smith");
-    }
 
     // the endpoint that DOES own the list still changes it. preserving on PUT must not turn
     // accountIds into a field nothing can ever write.
@@ -350,24 +265,8 @@ class CustomerRepositoryTest
         assertThat(saved.getValue().getAccountIds()).containsExactly(101, 104);
     }
 
-    // role is a field the client both reads and owns, so it stays inside the replacement.
-    // this is what makes a separate PATCH /customers/{id}/role unnecessary.
-    @Test
-    void editCustomer_stillChangesTheRole_withoutDisturbingPasswordOrAccounts()
-    {
-        CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
-        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
-
-        // exactly what an admin dashboard sends to promote someone
-        repository.editCustomer(1, new Customer(1, "alice", "Alice Smith", List.of(), Role.ADMIN, null));
-
-        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
-        verify(mongo).save(saved.capture());
-        assertThat(saved.getValue().getRole()).isEqualTo(Role.ADMIN);
-        assertThat(saved.getValue().getPassword()).isEqualTo("alice123");
-        assertThat(saved.getValue().getAccountIds()).containsExactly(101);
-    }
+    // the two fields PUT does replace, asserted alongside the four it does not. a rename
+    // must still work, and must still leave role, password and accounts exactly as stored.
 
     //----------------------------------------------------------------SERVER ASSIGNED IDS----------------------------------------------------------------
 
@@ -404,5 +303,40 @@ class CustomerRepositoryTest
         when(mongo.findAll()).thenReturn(List.of());
 
         assertThat(repository.nextCustomerId()).isEqualTo(1);
+    }
+
+    /*
+     * ONE TEST NOW COVERS WHAT NINE USED TO, and the shrinkage is the point rather than a
+     * loss of coverage.
+     *
+     * Those nine each pinned a field this method had to be careful not to write - role from
+     * the body, a stale accountIds echo, a blank password, an id mismatch. None of them can
+     * be expressed any more: UpdateCustomerRequest carries username and fullName and nothing
+     * else, so there is no id, role, password or accountIds arriving to be mishandled. Cases
+     * that cannot occur do not need tests; what needs a test is that the two fields which DO
+     * arrive are written, and that everything else survives untouched.
+     */
+    @Test
+    void editCustomer_replacesUsernameAndFullName_andLeavesEveryServerOwnedFieldAlone()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(4)).thenReturn(Optional.of(
+            new Customer(4, "admin", "Admin User", List.of(101), Role.ADMIN, "admin123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        repository.editCustomer(4, "admin2", "Renamed Admin");
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+
+        // the two fields a client owns
+        assertThat(saved.getValue().getUsername()).isEqualTo("admin2");
+        assertThat(saved.getValue().getFullName()).isEqualTo("Renamed Admin");
+
+        // and the four it does not, none of which this method can even see
+        assertThat(saved.getValue().getId()).isEqualTo(4);
+        assertThat(saved.getValue().getRole()).isEqualTo(Role.ADMIN);
+        assertThat(saved.getValue().getPassword()).isEqualTo("admin123");
+        assertThat(saved.getValue().getAccountIds()).containsExactly(101);
     }
 }

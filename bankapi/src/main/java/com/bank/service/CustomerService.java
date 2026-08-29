@@ -101,15 +101,16 @@ public class CustomerService
      * the admin-shaped create preserved only a hole. Merging them makes the guarantee
      * universal rather than true of one route.
      *
-     * WHAT IS AND IS NOT GUARANTEED, because the difference matters:
+     * WHAT IS GUARANTEED, now the complete statement rather than half of it:
      *
-     *   TRUE: no create path can mint an admin. There is nowhere in any create request to
-     *   say so, for any caller including curl.
+     *   NO CALLER CAN SET A ROLE ANYWHERE IN THIS API. There is nowhere in any create
+     *   request to say so, and editCustomer no longer writes role either. Roles are assigned
+     *   at seed time and by nothing else, for every caller including curl.
      *
-     *   FALSE: that the API cannot mint an admin. editCustomer still takes a role straight
-     *   from the body with nothing checking who is asking - a decided position, gated in the
-     *   front end only. A caller can create a customer here and then PUT itself to ADMIN.
-     *   Closing the create path did not close that, and nobody should read it as having done so.
+     * This block used to record the opposite - that closing the create path left PUT open,
+     * so a caller could create a customer and then promote itself. True when written, false
+     * now. Cost of the change: promoting a second admin needs a database edit or a code
+     * change, and there is deliberately no endpoint for it.
      *
      * Empty Optional means the username is taken. That is a genuine conflict now: a caller
      * cannot pick a colliding id, so the username is the only thing two creates can fight over.
@@ -181,23 +182,24 @@ public class CustomerService
         return admins.size() == 1 && Objects.equals(admins.get(0).getId(), id);
     }
 
-    public Optional<Customer> editCustomer(int id, Customer data)
+    /*
+     * Updates the two fields a client owns. It cannot do anything else, because
+     * UpdateCustomerRequest cannot express anything else.
+     *
+     * THE ID MISMATCH CHECK IS GONE, and it is unreachable rather than removed on a whim:
+     * the request has no id to disagree with the path, so there is no mismatch to reject.
+     * The 400 it produced is likewise gone from the controller.
+     *
+     * THE DEMOTION GUARD IS GONE TOO, and this is the better outcome of the two. It used to
+     * refuse demoting the last admin, then became unreachable when PUT stopped writing role,
+     * and is now IMPOSSIBLE TO EXPRESS - there is no role parameter to demote anyone with.
+     * A guard that cannot be bypassed because the operation does not exist beats a guard
+     * that has to run correctly every time. The DELETE half of that invariant is still live
+     * and still enforced in deleteCustomerById, which is where isLastAdmin is now used.
+     */
+    public Optional<Customer> editCustomer(int id, String username, String fullName)
     {
-        // Objects.equals, not !=, so a null body id is a mismatch rather than an NPE.
-        if (!Objects.equals(data.getId(), id))
-        {
-            return Optional.empty(); // id mismatch
-        }
+        return customerRepository.editCustomer(id, username, fullName);
 
-        // the second half of the last-admin invariant - see deleteCustomerById. demoting the
-        // last admin strands the system exactly as deleting them does, so the same rule
-        // applies. an edit that LEAVES them an admin is fine; only the demotion is refused.
-        if (isLastAdmin(id) && data.getRole() != Role.ADMIN)
-        {
-            return Optional.empty(); // refused, not absent. the controller checks existence first.
-        }
-
-        // existence checked at repo level
-        return customerRepository.editCustomer(id, data);
     }
 }

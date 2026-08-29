@@ -68,7 +68,14 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <NavLink to="/" className={linkClass} end>Home</NavLink>
-      <NavLink to="/customers" className={linkClass}>Customers</NavLink>
+      {/* NO CUSTOMERS LINK. The route it pointed at is gone - it listed every customer, with
+          a create form and a delete button, to anybody who was signed in. The list lives on
+          the administrator dashboard now and has no address of its own, so there is nothing
+          here to link to.
+
+          Removing the link is a CONSEQUENCE of removing the route, never a substitute for it.
+          A nav that hides a live route leaves that route typeable, which is what made the
+          original gap possible - the link was not the problem, the reachable page was. */}
       <NavLink to="/dashboard" className={linkClass}>Dashboard</NavLink>
       <NavLink to="/about" className={linkClass}>About</NavLink>
       <NavLink to="/contact" className={linkClass}>Contact</NavLink>

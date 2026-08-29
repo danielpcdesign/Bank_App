@@ -1,7 +1,6 @@
 package com.bank.controller;
 import java.net.URI;
 import java.util.List;
-import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -151,10 +150,10 @@ public class CustomerController
                     + "username, password and fullName only - there is NO field for an id or a role, so no "
                     + "caller can choose either. The server assigns the next free id and always CUSTOMER. "
                     + "That is structural rather than a check: nothing strips a role, because a role cannot "
-                    + "arrive. NOTE THE LIMIT - this closes the CREATE path only. PUT /api/v1/customers/{id} "
-                    + "still accepts a role from any caller by an explicit decision, so a caller can create a "
-                    + "customer here and then PUT itself to ADMIN. This briefly had a sibling at "
-                    + "/customers/register; the two were merged and this is the survivor.")
+                    + "arrive. Nor can any other route set one - PUT does not write role either, so no caller "
+                    + "can change any customer's role anywhere in this API. Roles are assigned at seed time. "
+                    + "This briefly had a sibling at /customers/register; the two were merged and this is the "
+                    + "survivor.")
     @ApiResponses({
         @ApiResponse(
             responseCode = "201",
@@ -221,13 +220,12 @@ public class CustomerController
 
     @Operation(
         summary = "Replace a customer",
-        description = "Full replacement, not a partial update - every field in the body is written. Note the "
-                    + "body's role is written too, and NOTHING CHECKS WHO IS ASKING: any caller may promote "
-                    + "anyone to ADMIN here. The admin-only restriction on that lives in the front end alone "
-                    + "and is bypassed by curl or any other client. Documented rather than fixed - real "
-                    + "enforcement needs an authenticated principal, in phase 10. The body's "
-                    + "id must equal the path's. A mismatch is rejected rather than resolved: either half could "
-                    + "be the typo, and guessing wrong overwrites the wrong record.")
+        description = "Replaces username and fullName. The body carries ONLY those two fields - there is no "
+                    + "id, role, password or accountIds to send, so none of them can be smuggled in or "
+                    + "accidentally required. A client is never given a password (write-only) and does not own "
+                    + "its id, role or account list, so a full replacement covers exactly what is left. ROLE IS "
+                    + "NOT SETTABLE anywhere in this API, on create or update; roles are assigned at seed time. "
+                    + "The path is the only identity, so there is no body id to mismatch.")
     @ApiResponses({
         @ApiResponse(
             responseCode = "200",
@@ -237,36 +235,19 @@ public class CustomerController
                 schema = @Schema(implementation = Customer.class))),
         @ApiResponse(
             responseCode = "400",
-            description = "Either the body failed validation, or its id does not match the path id. "
-                        + "The response distinguishes neither, deliberately.",
+            description = "username or fullName missing or blank. The response names no field, deliberately.",
             content = @Content),
         @ApiResponse(
             responseCode = "404",
             description = "No customer has that id. PUT does not create.",
-            content = @Content),
-        @ApiResponse(
-            responseCode = "409",
-            description = "The body would demote the last remaining admin. Same invariant as DELETE and "
-                        + "enforced for every caller: demoting the last admin strands the system exactly "
-                        + "as deleting them would. Changing anything else about that customer is allowed.",
             content = @Content)
     })
     @PutMapping("/customers/{id}")
-    public ResponseEntity<Customer> editCustomer(@PathVariable int id, @Valid @RequestBody Customer customer)
+    public ResponseEntity<Customer> editCustomer(@PathVariable int id, @Valid @RequestBody UpdateCustomerRequest request)
     {
-        if (!Objects.equals(customer.getId(), id))
-        {       
-            return ResponseEntity.badRequest().build(); //mismatch between path and body. 400
-        }
-
-        // as with delete: existence first, so an empty Optional below means refused.
-        if (customerService.getCustomerById(id).isEmpty())
-        {
-            return ResponseEntity.notFound().build(); //404
-        }
-
-        return customerService.editCustomer(id, customer)
+        // no body id, so no mismatch to check - the path is the only identity there is.
+        return customerService.editCustomer(id, request.username(), request.fullName())
             .map(ResponseEntity::ok) //200
-            .orElseGet(() -> ResponseEntity.status(HttpStatus.CONFLICT).build()); //409 - last admin demotion
+            .orElseGet(() -> ResponseEntity.notFound().build()); //404
     }
 }

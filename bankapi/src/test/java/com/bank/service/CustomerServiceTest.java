@@ -10,6 +10,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -37,39 +38,11 @@ class CustomerServiceTest
     // the mismatch is rejected by the service itself, so storage is never consulted.
     // verifyNoInteractions is what proves the short circuit - an assertion on the
     // return value alone would still pass if the service called the repository first.
-    @Test
-    void editCustomer_rejectsAnIdMismatch_withoutTouchingTheRepository()
-    {
-        Customer body = new Customer(5, "bob", "Bob Jones");
 
-        assertThat(service.editCustomer(2, body)).isEmpty();
-
-        verifyNoInteractions(repository);
-    }
-
-    @Test
-    void editCustomer_rejectsANullBodyId_withoutThrowing()
-    {
-        Customer body = new Customer(null, "bob", "Bob Jones");
-
-        assertThat(service.editCustomer(2, body)).isEmpty();
-
-        verifyNoInteractions(repository);
-    }
     // a regression test for the bug fixed at the end of phase 2. `data.getId() != id`
     // unboxed the Integer, so a null body id was an NPE rather than a rejection.
     // @Valid stops that at the controller - and a unit test has no controller in front of it.
 
-    @Test
-    void editCustomer_delegatesToTheRepository_whenTheIdsAgree()
-    {
-        Customer body = new Customer(2, "bob", "Bob Jones");
-        Customer updated = new Customer(2, "bob", "Bob J. Jones");
-
-        when(repository.editCustomer(2, body)).thenReturn(Optional.of(updated));
-
-        assertThat(service.editCustomer(2, body)).contains(updated);
-    }
     // stub repository.editCustomer(2, body) to return the updated customer,
     // assert the service hands back exactly what the repository gave it.
 
@@ -238,6 +211,15 @@ class CustomerServiceTest
 
     //----------------------------------------------------------------THE LAST ADMIN----------------------------------------------------------------
 
+    /*
+     * The invariant is "at least one admin must remain", not "an admin must not be deleted".
+     * These four pin the difference: the LAST admin is protected, a second one is not, and a
+     * non-admin is never affected no matter how many admins exist.
+     *
+     * This is the only rule in the application that binds every caller. It needs no
+     * authentication because it asks about the state of the system rather than who is
+     * asking - the same reason Account can enforce its overdraft floor without a principal.
+     */
     @Test
     void deleteCustomerById_refusesToRemoveTheLastAdmin()
     {
@@ -247,5 +229,70 @@ class CustomerServiceTest
         assertThat(service.deleteCustomerById(4)).isFalse();
 
         verify(repository, never()).deleteById(4);
+    }
+
+    @Test
+    void deleteCustomerById_allowsRemovingAnAdmin_whenAnotherAdminRemains()
+    {
+        when(repository.getCustomersByRole(Role.ADMIN)).thenReturn(List.of(
+            new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN, "admin123"),
+            new Customer(5, "admin2", "Second Admin", List.of(), Role.ADMIN, "admin456")));
+        when(repository.deleteById(4)).thenReturn(true);
+
+        assertThat(service.deleteCustomerById(4)).isTrue();
+    }
+
+    @Test
+    void deleteCustomerById_allowsRemovingANonAdmin_whileOnlyOneAdminExists()
+    {
+        when(repository.getCustomersByRole(Role.ADMIN)).thenReturn(List.of(
+            new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN, "admin123")));
+        when(repository.deleteById(1)).thenReturn(true);
+
+        assertThat(service.deleteCustomerById(1)).isTrue();
+    }
+
+    /*
+     * The demotion half of the invariant. UNREACHABLE THROUGH THE API as it stands, because
+     * editCustomer no longer writes role at all - no request can demote anyone. These test
+     * the service method directly, which still carries the guard.
+     *
+     * Kept deliberately: the invariant is correct independently of which routes exist today,
+     * and if any future route ever sets a role, this is already there to refuse the demotion
+     * rather than something someone has to remember to add back. The DELETE half above is
+     * fully live and reachable.
+     */
+
+
+    // only the DEMOTION is refused. the last admin can still change their name or password.
+
+    /*
+     * What is left of editCustomer at this layer: it passes two strings down and hands back
+     * what the repository gave it.
+     *
+     * FOUR TESTS WERE DELETED HERE, all of them describing requests that can no longer be
+     * built. Two checked an id mismatch between body and path - UpdateCustomerRequest has no
+     * id, so there is nothing to mismatch. Two more checked the last-admin demotion guard,
+     * which is gone because the method has no role parameter to demote anyone with.
+     *
+     * That guard ending up unbuildable rather than merely unreachable is the better outcome:
+     * an operation that cannot be expressed needs no rule forbidding it. The DELETE half of
+     * the same invariant is still live and still tested, in the section above.
+     */
+    @Test
+    void editCustomer_passesTheTwoOwnedFieldsToTheRepository()
+    {
+        Customer updated = new Customer(2, "bob2", "Bob J. Jones", List.of(), Role.CUSTOMER, "bob123");
+        when(repository.editCustomer(2, "bob2", "Bob J. Jones")).thenReturn(Optional.of(updated));
+
+        assertThat(service.editCustomer(2, "bob2", "Bob J. Jones")).contains(updated);
+    }
+
+    @Test
+    void editCustomer_reportsAbsenceStraightThrough()
+    {
+        when(repository.editCustomer(99, "ghost", "Ghost User")).thenReturn(Optional.empty());
+
+        assertThat(service.editCustomer(99, "ghost", "Ghost User")).isEmpty();
     }
 }

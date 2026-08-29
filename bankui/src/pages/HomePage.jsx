@@ -54,7 +54,11 @@ export default function HomePage() {
           should be a real link: it can be middle-clicked into a new tab, copied, and read
           by a screen reader as a destination. useNavigate is for moves that are a
           CONSEQUENCE - a save completing - where there is nothing to click. */}
-      <p><Link to="/customers">Go to the customer directory &rarr;</Link></p>
+      {/* to the dashboard rather than to a customer directory, which no longer has an
+          address. /dashboard means "mine" and resolves to whoever is signed in, so this one
+          link is right for an administrator and a customer both - it lands each of them on
+          the screen that is theirs. */}
+      <p><Link to="/dashboard">Go to your dashboard &rarr;</Link></p>
 
       <h2>Coming next</h2>
       <ul>

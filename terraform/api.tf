@@ -13,9 +13,9 @@
  */
 
 variable "app_branch" {
-  description = "Branch the instance builds from. Pinned explicitly rather than relying on the repository default: `main` is two phases behind and has no Dockerfile, which is what the first boot discovered. An explicit branch also means a deploy cannot change meaning because somebody merged something."
+  description = "Branch the instance builds from. Named explicitly rather than inherited: the first boot cloned the repository default, which was two phases stale and had no Dockerfile, so the build failed with an error about a missing file rather than about a wrong branch. main has since been brought current, but stating the branch means a deploy cannot change meaning because somebody merged something - which makes WHICH code is running a fact in the config rather than a property of the repository at that moment."
   type        = string
-  default     = "CI_CD"
+  default     = "main"
 }
 
 variable "ssh_cidr" {

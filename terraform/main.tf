@@ -110,6 +110,15 @@ data "aws_cloudfront_cache_policy" "optimized" {
   name = "Managed-CachingOptimized"
 }
 
+# Forwards the viewer's headers, query strings and cookies to the origin. The DEFAULT is to
+# forward almost nothing, which for an API is fatal in a way that is hard to diagnose: strip
+# Content-Type and every POST body arrives unlabelled, so Spring answers 415 to requests that
+# are perfectly well formed. ExceptHostHeader rather than AllViewer so the origin still sees
+# its own hostname rather than the distribution's.
+data "aws_cloudfront_origin_request_policy" "all_viewer" {
+  name = "Managed-AllViewerExceptHostHeader"
+}
+
 resource "aws_cloudfront_distribution" "site" {
   enabled             = true
   default_root_object = "index.html"
@@ -119,6 +128,29 @@ resource "aws_cloudfront_distribution" "site" {
     domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
     origin_id                = "s3-site"
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
+  }
+
+  /*
+   * The API, on EC2. Referenced through the resource rather than hardcoded, so replacing the
+   * instance updates the origin instead of silently breaking it - which matters here because
+   * the account had no Elastic IP left and the address is therefore not stable.
+   *
+   * http-only: the instance terminates plain HTTP on 8080 with no certificate. That leaves
+   * the CloudFront-to-origin hop UNENCRYPTED across the public internet, which is a real
+   * weakness and an accepted one for a training deployment - viewer-to-CloudFront is HTTPS,
+   * so a browser sees TLS, but the last leg is not protected. Closing it properly needs a
+   * certificate on the instance, which needs a domain name.
+   */
+  origin {
+    domain_name = aws_instance.api.public_dns
+    origin_id   = "ec2-api"
+
+    custom_origin_config {
+      http_port              = 8080
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
   }
 
   /*
@@ -164,6 +196,30 @@ resource "aws_cloudfront_distribution" "site" {
     error_code         = 403
     response_code      = 200
     response_page_path = "/index.html"
+  }
+
+  /*
+   * /api/* goes to the instance, everything else to S3.
+   *
+   * allowed_methods lists every write verb. The default is GET and HEAD only, so without this
+   * POST, PUT and DELETE are rejected BY CLOUDFRONT before they ever reach the API - a 403
+   * that looks like the application refusing the request rather than the CDN.
+   *
+   * cached_methods stays GET/HEAD: CloudFront will not cache a POST regardless, and listing
+   * write verbs there would be meaningless rather than harmful.
+   *
+   * CachingDisabled because an API response is not a static asset. Caching /api/v1/customers
+   * would serve one user's list to the next request and hide every write that followed it.
+   */
+  ordered_cache_behavior {
+    path_pattern             = "/api/*"
+    target_origin_id         = "ec2-api"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    compress                 = true
   }
 
   restrictions {

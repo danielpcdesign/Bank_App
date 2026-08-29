@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 
 import com.bank.model.Customer;
+import com.bank.model.Role;
 
 // CustomerMongoRepository is the mock, so nothing here touches atlas. what is under test
 // is the wrapper's own branching: the seed guard, the duplicate catch, and the two
@@ -36,14 +38,16 @@ class CustomerRepositoryTest
         return new CustomerRepository(mongo);
     }
 
+    // four now, not three: the seed gained a dedicated admin so that filtering by role has
+    // something to find. the count is the assertion, so it moves with the seed.
     @Test
-    void seedsThreeCustomers_whenTheCollectionIsEmpty()
+    void seedsFourCustomers_whenTheCollectionIsEmpty()
     {
         when(mongo.count()).thenReturn(0L);
 
         new CustomerRepository(mongo);
 
-        verify(mongo, times(3)).save(any(Customer.class));
+        verify(mongo, times(4)).save(any(Customer.class));
     }
 
     // the behaviour that stopped deletes being undone by a restart. before seeding
@@ -107,7 +111,7 @@ class CustomerRepositoryTest
     void editCustomer_returnsEmptyAndSavesNothing_whenTheIdIsAbsent()
     {
         CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.existsById(99)).thenReturn(false);
+        when(mongo.findById(99)).thenReturn(Optional.empty());
 
         assertThat(repository.editCustomer(99, new Customer(99, "ghost", "Ghost User"))).isEmpty();
 
@@ -121,7 +125,7 @@ class CustomerRepositoryTest
     void editCustomer_keysTheReplacementByThePathId_ignoringTheBodyId()
     {
         CustomerRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.existsById(2)).thenReturn(true);
+        when(mongo.findById(2)).thenReturn(Optional.of(new Customer(2, "bob", "Bob Jones", List.of(), Role.CUSTOMER, "bob123")));
         when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
 
         // body claims id 99 on purpose. the repository must not believe it.
@@ -142,5 +146,263 @@ class CustomerRepositoryTest
         when(mongo.findById(99)).thenReturn(Optional.empty());
 
         assertThat(repository.findById(99)).isEmpty();
+    }
+
+    // the point of seeding an admin is that the role filter has something to find. if this
+    // ever goes back to four customers all in one role, the filter is untestable again.
+    @Test
+    void seedIncludesExactlyOneAdmin()
+    {
+        when(mongo.count()).thenReturn(0L);
+
+        new CustomerRepository(mongo);
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo, times(4)).save(saved.capture());
+
+        assertThat(saved.getAllValues())
+            .filteredOn(customer -> customer.getRole() == Role.ADMIN)
+            .singleElement()
+            .extracting(Customer::getUsername)
+            .isEqualTo("admin");
+    }
+
+    @Test
+    void getCustomersByRole_handsTheRoleToTheDerivedQuery()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        Customer admin = new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN);
+        when(mongo.findByRole(Role.ADMIN)).thenReturn(List.of(admin));
+
+        assertThat(repository.getCustomersByRole(Role.ADMIN)).containsExactly(admin);
+    }
+
+    // the replacement carries the role over from the body like every other field. without
+    // this a rename would silently demote an admin to a customer.
+    @Test
+    void editCustomer_carriesTheRoleFromTheBody()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(4)).thenReturn(Optional.of(new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN, "admin123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        repository.editCustomer(4, new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getRole()).isEqualTo(Role.ADMIN);
+    }
+
+    // the one admin, with the credentials the front end signs in with. if these drift the
+    // seeded admin becomes unreachable and nobody can reach an admin view at all.
+    @Test
+    void seedsTheAdminWithTheExpectedCredentials()
+    {
+        when(mongo.count()).thenReturn(0L);
+
+        new CustomerRepository(mongo);
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo, times(4)).save(saved.capture());
+
+        Customer admin = saved.getAllValues().stream()
+            .filter(customer -> customer.getRole() == Role.ADMIN)
+            .findFirst()
+            .orElseThrow();
+
+        assertThat(admin.getUsername()).isEqualTo("admin");
+        assertThat(admin.getPassword()).isEqualTo("admin123");
+    }
+
+    // every seeded customer needs a password now that the field is required, or the three
+    // non-admin seeds could never sign in.
+    @Test
+    void seedsEveryCustomerWithAPassword()
+    {
+        when(mongo.count()).thenReturn(0L);
+
+        new CustomerRepository(mongo);
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo, times(4)).save(saved.capture());
+
+        assertThat(saved.getAllValues())
+            .allSatisfy(customer -> assertThat(customer.getPassword()).isNotBlank());
+    }
+
+    @Test
+    void findByUsername_passesAbsenceStraightThrough()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findByUsername("ghost")).thenReturn(Optional.empty());
+
+        assertThat(repository.findByUsername("ghost")).isEmpty();
+    }
+
+    // password is carried from the body like every other field, which is what makes PUT a
+    // genuine full replacement rather than a partial one.
+    @Test
+    void editCustomer_carriesThePasswordFromTheBody()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "alice123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        repository.editCustomer(1, new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "newpw"));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getPassword()).isEqualTo("newpw");
+    }
+
+    // the fix for the deadlock between WRITE_ONLY and full-replacement PUT. a client is never
+    // sent a password, so a body that omits one must leave the stored value alone rather than
+    // blanking it. without this, editing a username locks the customer out permanently.
+    @Test
+    void editCustomer_preservesTheStoredPassword_whenTheBodyOmitsIt()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        // a realistic edit: the username changed, and the client never had a password to send
+        repository.editCustomer(1, new Customer(1, "alice2", "Alice Smith", List.of(101), Role.CUSTOMER, null));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getPassword()).isEqualTo("alice123");
+        assertThat(saved.getValue().getUsername()).isEqualTo("alice2");
+    }
+
+    // a blank string is treated as "not supplied" too. an empty form field must not be able
+    // to erase a password by accident.
+    @Test
+    void editCustomer_preservesTheStoredPassword_whenTheBodySendsABlankOne()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "alice123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        repository.editCustomer(1, new Customer(1, "alice", "Alice Smith", List.of(), Role.CUSTOMER, "   "));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getPassword()).isEqualTo("alice123");
+    }
+
+    // accountIds is now taken from the stored document, never from the body. a client
+    // editing a username and saying nothing about accounts keeps its accounts.
+    @Test
+    void editCustomer_preservesTheStoredAccountIds_whenTheBodyOmitsThem()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        // a username edit that says nothing about accounts
+        repository.editCustomer(1, new Customer(1, "alice2", "Alice Smith"));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getAccountIds()).containsExactly(101);
+        assertThat(saved.getValue().getUsername()).isEqualTo("alice2");
+    }
+
+    /*
+     * THE LOST UPDATE THIS PREVENTS, and the reason omission was never the real risk.
+     *
+     * The front end echoes accountIds: it fetches a customer, carries the list through a
+     * form untouched, and sends it back. So the dangerous body is not the one that omits the
+     * list - it is the one that faithfully repeats a list that has since gone stale. If an
+     * account is opened between that GET and this PUT, honouring the body would unlink it.
+     *
+     * Here the stored customer has account 102 (opened moments ago) and the body still
+     * carries the older [101] it was handed. The write must keep 102.
+     */
+    @Test
+    void editCustomer_ignoresAStaleAccountIdsList_ratherThanUnlinkingTheNewerAccount()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101, 102), Role.CUSTOMER, "alice123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        // body echoes the list as it looked before 102 was opened
+        repository.editCustomer(1, new Customer(1, "alice", "Alice B. Smith", List.of(101), Role.CUSTOMER, null));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getAccountIds()).containsExactly(101, 102);
+        assertThat(saved.getValue().getFullName()).isEqualTo("Alice B. Smith");
+    }
+
+    // the endpoint that DOES own the list still changes it. preserving on PUT must not turn
+    // accountIds into a field nothing can ever write.
+    @Test
+    void save_stillWritesAChangedAccountList()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        repository.save(new Customer(1, "alice", "Alice Smith", List.of(101, 104), Role.CUSTOMER, "alice123"));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getAccountIds()).containsExactly(101, 104);
+    }
+
+    // role is a field the client both reads and owns, so it stays inside the replacement.
+    // this is what makes a separate PATCH /customers/{id}/role unnecessary.
+    @Test
+    void editCustomer_stillChangesTheRole_withoutDisturbingPasswordOrAccounts()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
+        when(mongo.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
+
+        // exactly what an admin dashboard sends to promote someone
+        repository.editCustomer(1, new Customer(1, "alice", "Alice Smith", List.of(), Role.ADMIN, null));
+
+        ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
+        verify(mongo).save(saved.capture());
+        assertThat(saved.getValue().getRole()).isEqualTo(Role.ADMIN);
+        assertThat(saved.getValue().getPassword()).isEqualTo("alice123");
+        assertThat(saved.getValue().getAccountIds()).containsExactly(101);
+    }
+
+    //----------------------------------------------------------------SERVER ASSIGNED IDS----------------------------------------------------------------
+
+    @Test
+    void nextCustomerId_isOneAboveTheHighestExistingId()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findAll()).thenReturn(List.of(
+            new Customer(1, "alice", "Alice Smith"),
+            new Customer(4, "admin", "Admin User")));
+
+        assertThat(repository.nextCustomerId()).isEqualTo(5);
+    }
+
+    // highest-plus-one rather than count-plus-one. with 1 and 4 stored, a count would
+    // propose 3 - free here, but it proposes 4 the moment id 3 exists and 1 has been
+    // deleted, colliding with a live record.
+    @Test
+    void nextCustomerId_doesNotReuseAnIdFreedByADelete()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findAll()).thenReturn(List.of(
+            new Customer(2, "bob", "Bob Jones"),
+            new Customer(3, "carol", "Carol Johnson")));
+
+        // a count would say 3, which is taken
+        assertThat(repository.nextCustomerId()).isEqualTo(4);
+    }
+
+    @Test
+    void nextCustomerId_startsAtOne_whenNoCustomersExist()
+    {
+        CustomerRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findAll()).thenReturn(List.of());
+
+        assertThat(repository.nextCustomerId()).isEqualTo(1);
     }
 }

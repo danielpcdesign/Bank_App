@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import AddCustomerForm from '../components/AddCustomerForm.jsx'
+import CreateCustomerForm from '../components/CreateCustomerForm.jsx'
 import CustomerList from '../components/CustomerList.jsx'
 import { deleteCustomer, getCustomers } from '../services/api.js'
 
@@ -107,7 +107,7 @@ export default function CustomersPage() {
       {/* the page owns the data, so the page owns the refresh. the form is handed the
           ability to trigger one without being told what it does, and without being able to
           reach `customers` itself. the child announces; the parent decides. */}
-      <AddCustomerForm onCreated={loadCustomers} />
+      <CreateCustomerForm heading="Add customer" onCreated={loadCustomers} />
 
       {loading
         ? <p>Loading...</p>

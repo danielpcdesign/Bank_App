@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.bank.repository.AccountMongoRepository;
 import com.bank.repository.CustomerMongoRepository;
 
 
@@ -12,6 +13,11 @@ class BankapiApplicationTests {
 
 	@MockitoBean
   	private CustomerMongoRepository mongo;
+
+	// AccountRepository seeds from its constructor too, so without this the context tries to
+	// reach a real mongo and the test hangs for 30s before failing.
+	@MockitoBean
+  	private AccountMongoRepository accountMongo;
 
 	@Test
 	void contextLoads() {

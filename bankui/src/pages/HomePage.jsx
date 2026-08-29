@@ -27,7 +27,28 @@ export default function HomePage() {
         <li>Add a customer</li>
         <li>Edit a customer&rsquo;s details</li>
         <li>Remove a customer</li>
+        <li>View a customer&rsquo;s accounts and balances</li>
+        <li>Deposit to and withdraw from an account</li>
+        <li>Open and close accounts, from the administrator dashboard</li>
+        <li>Register an account, and sign in to it</li>
+        <li>See the dashboard for your role</li>
       </ul>
+
+      {/* said on the landing page rather than only on the screens themselves, because this is
+          the page somebody lands on before forming an impression of what the app enforces.
+          The copy rule this file set for itself - describe what the app genuinely does today
+          rather than what it looks like it does - applies hardest to the thing it does not
+          do. */}
+      <h2>What it does not do</h2>
+      <p>
+        Signing in checks a real password against the database, and the role on the customer
+        it returns decides which dashboard you see. Every page here now requires it. That is
+        where it stops. Nothing is issued and nothing is remembered, so every request after
+        the sign-in is anonymous, and the API answers all of them from any caller &mdash; the
+        gate is in this browser, not in the server. It means the site no longer shows a
+        stranger every customer by default, which is worth having. It does not mean the data
+        is protected.
+      </p>
 
       {/* Link, not a button with an onClick + navigate(). A navigation that a user chooses
           should be a real link: it can be middle-clicked into a new tab, copied, and read
@@ -37,8 +58,8 @@ export default function HomePage() {
 
       <h2>Coming next</h2>
       <ul>
-        <li>Accounts and transactions</li>
-        <li>Sign in, with the API enforcing it</li>
+        <li>Transfers between accounts</li>
+        <li>The API enforcing the role, rather than the browser</li>
         <li>Search and filtering</li>
       </ul>
     </section>

@@ -167,3 +167,130 @@ form input {
   border-radius: 4px;
   padding: 0.4rem 0.8rem;
 }
+
+/* ---------------------------------------------------------------- money */
+
+/* Numbers in a column are read down, not across, so they are right-aligned - the digits then
+   line up by place value and a long balance is visibly longer than a short one.
+
+   tabular-nums asks the font for fixed-width figures. Most UI fonts are proportional, so a 1
+   is narrower than a 0 and columns of numbers wobble as the values change. This is the one
+   place that matters enough to ask for the other set. */
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An overdrawn balance. Deliberately NOT .error red: a checking account inside its overdraft
+   limit is exactly what the domain permits, and styling a permitted state as a fault trains
+   the user to ignore the colour that means something is actually broken.
+
+   light-dark() picks per theme, which this stylesheet is entitled to use because :root
+   already declares color-scheme: light dark. A single fixed colour would be unreadable in
+   one of the two.
+
+   And the colour is never alone: Money renders negatives in accounting notation - ($100) -
+   so the sign survives for a reader who sees no colour difference at all. Same principle the
+   nav's active link follows, weight as well as colour. */
+.money-negative {
+  color: light-dark(#9a5b00, #f0a340);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- transactions */
+
+/* The form sits inside a table cell, so it lays out in a row rather than as the stack that
+   `form label { display: block }` gives every other form in the app. */
+.txn-form label {
+  display: inline;
+}
+
+.txn-amount {
+  /* wide enough for a realistic amount and no wider - an input sized to the content tells
+     the user what is expected of it. */
+  width: 9ch;
+  margin-left: 0;
+  text-align: right;
+}
+
+/* the outcome message, under the controls it belongs to rather than beside them, so a long
+   refusal does not stretch the column. */
+.txn-form p {
+  margin: 0.4rem 0 0 0;
+  font-size: 0.9rem;
+}
+
+/* Present for a screen reader, absent for everyone else. Clipping rather than display: none
+   or visibility: hidden, because both of those remove the element from the accessibility
+   tree as well - which would defeat the entire point of having the label. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* text-transform rather than capitalising the string in JavaScript. The value stays the word
+   the data actually holds - which is what a test would assert on, and what a future filter
+   would compare - while only its appearance changes. */
+.capitalise {
+  text-transform: capitalize;
+}
+
+/* ---------------------------------------------------------------- notices */
+
+/* The "there is no sign-in" banner. Deliberately not .error red and not a green success box:
+   it is neither a fault nor a reassurance, it is a standing statement of fact about what this
+   application does not do. A left rule and a tint read as "read this" without claiming
+   something has gone wrong.
+
+   light-dark() because :root already declares color-scheme: light dark, and a fixed tint
+   would be unreadable in one of the two. */
+.notice {
+  border-left: 4px solid;
+  background: light-dark(#f4f1e8, #2a2620);
+  padding: 0.6rem 0.9rem;
+  max-width: 65ch;
+}
+
+/* ---------------------------------------------------------------- dashboards */
+
+/* the two dashboards stack a table, a form, a table and a form. Without this each heading
+   sits right on top of the thing above it and the sections stop reading as sections. */
+.app-main h2 {
+  margin-top: 2rem;
+}
+
+.app-main h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
+/* a select is not an input, so the rule that indents form inputs does not reach it. Same
+   offset, so labels and controls line up down a form that mixes the two. */
+form select {
+  margin-left: 0.5rem;
+}
+
+/* A button that has to sit in a row of links without looking like the odd one out. It is a
+   <button> because signing out is an ACTION - it changes something - and actions must not be
+   links: a link can be prefetched, middle-clicked into a background tab, or followed by a
+   crawler, and none of those should sign anybody out. The element is chosen for behaviour and
+   then styled to match its neighbours, never the reverse. */
+.link-button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 0 0.15rem 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  border-bottom-color: currentColor;
+}

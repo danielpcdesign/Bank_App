@@ -92,7 +92,29 @@ resource "aws_instance" "api" {
   # the declaration and the reality drift apart silently. true makes a bootstrap change
   # recreate the instance, which is the only way the script and the machine stay the same
   # thing.
-  user_data_replace_on_change = true
+  #
+  # STOPGAP - deliberately false, and this is the drift the paragraph above argues against.
+  # It is accepted knowingly rather than by oversight, so it should be reverted, not inherited.
+  #
+  # Why: user_data below now passes BANKAPI_CORS_ALLOWED_ORIGINS to the container, without
+  # which the deployed API rejects the distribution's own origin and returns 403 on every
+  # sign-in. Recreating the instance to deliver that one-word change would destroy
+  # /opt/bankapi/.env, which this script deliberately never writes - so the box would come
+  # back with no connection string and the service dead until the Atlas credential was
+  # hand-entered again. Replacing an instance to fix CORS is not worth handling a credential.
+  #
+  # The running instance already has both the env var and the unit change, applied by hand.
+  # So the code and the machine agree TODAY; what false costs is the guarantee that they
+  # still agree after the next edit to this script. Anyone changing user_data from here on
+  # must apply it to the box themselves or accept that it will not take effect until the
+  # instance is next replaced.
+  #
+  # What retires this properly: AGENTS.md section 7 records that Phase 11 secrets belong in
+  # AWS Systems Manager Parameter Store, "not a raw env var on an instance" - decided and
+  # never implemented. Fetch MONGODB_URI from Parameter Store at boot and .env becomes
+  # reproducible from code, replacement stops being destructive, and this can go back to
+  # true, which is where it belongs.
+  user_data_replace_on_change = false
 
   user_data = <<-BOOT
     #!/bin/bash
@@ -121,6 +143,22 @@ resource "aws_instance" "api" {
     # create. Putting it in user-data would work and would also place a freshly rotated
     # credential into instance metadata, readable by anything that can reach 169.254.169.254
     # from on the box. It is written once over SSH instead.
+    #
+    # That file now carries TWO keys, and only one of them is a secret:
+    #   MONGODB_URI                   - the reason for the paragraph above.
+    #   BANKAPI_CORS_ALLOWED_ORIGINS  - the distribution URL. Not a secret at all; it lives
+    #                                   here only because it has nowhere better to go while
+    #                                   the connection string is hand-written. It cannot be
+    #                                   inlined below: the value is the CloudFront domain,
+    #                                   and the distribution's origin is this instance's DNS,
+    #                                   so referring to one from the other is a dependency
+    #                                   cycle Terraform will refuse to plan.
+    #
+    # Both are passed through by name on the docker run. Omitting the CORS one is not a
+    # degraded mode - the API falls back to its committed default of http://localhost:5173,
+    # rejects the distribution's own origin, and answers 403 to every browser POST. The
+    # distribution then rewrites that 403 into a 200 carrying index.html, so the failure
+    # reaches the client as a JSON parse error with nothing pointing at CORS.
     cat > /etc/systemd/system/bankapi.service <<'UNIT'
     [Unit]
     Description=bankapi
@@ -130,7 +168,7 @@ resource "aws_instance" "api" {
     [Service]
     EnvironmentFile=/opt/bankapi/.env
     ExecStartPre=-/usr/bin/docker rm -f bankapi
-    ExecStart=/usr/bin/docker run --rm --name bankapi -p 8080:8080 -e MONGODB_URI bankapi:local
+    ExecStart=/usr/bin/docker run --rm --name bankapi -p 8080:8080 -e MONGODB_URI -e BANKAPI_CORS_ALLOWED_ORIGINS bankapi:local
     Restart=always
     RestartSec=10
 

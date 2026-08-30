@@ -16,13 +16,13 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 | 8 | React front end — Vite, react-router | Complete — full CRUD against the API |
 | 9 | DevOps — CORS, GitHub Actions CI, Docker, Compose | Complete — Kubernetes deferred |
 | 10 | Security — hashing, BCrypt, AuthN/AuthZ, JWT | **Not started.** Read [Security](#security--what-is-and-is-not-enforced) before drawing any conclusion about this application's protections |
-| 11 | Cloud — AWS deployment | In progress — front end on S3 + CloudFront, API on EC2, **the two are not yet connected** |
+| 11 | Cloud — AWS deployment | Complete — front end on S3 + CloudFront, API on EC2, `/api` routed at the edge, working end to end |
 | 12 | IaC — Terraform | In progress alongside Phase 11 — the infrastructure was written as Terraform from the start rather than clicked together and codified afterwards |
 | 13–14 | Observability, microservices | Planned |
 
 Alongside those phases, and belonging to none of them, the domain caught up with the architecture: a full **`Account` vertical** (model → repository → service → controller, with deposit and withdraw), **customer roles**, a **sign-in endpoint**, and a front end rebuilt around **admin and customer dashboards**. That work is on the `app_branch` branch and is **not yet merged into `main`**.
 
-> **Deployment status, stated plainly because a live URL invites the wrong assumption.** The deployed front end is a **build made before** the sign-in and dashboard work, and the deployed distribution **cannot currently reach its API**. The live site is therefore not a demonstration of this repository's current state, and nothing about the application should be judged from it until both are refreshed. See [Phase 11](#phase-11--cloud-in-progress).
+> **Deployment status.** Both halves are live and current, and the site works end to end — sign-in renders a dashboard against the live database. That was not true for most of Phase 11: the deployed bundle predated the sign-in work and the distribution could not reach its API, so **anything observed on the live site in that period was evidence about an older build, not about this repository.** See [Phase 11](#phase-11--cloud).
 
 ## Security — what is and is not enforced
 
@@ -325,6 +325,8 @@ Two details worth knowing, both of which look like bugs the first time:
 
 CORS is enforced by the browser, not by the server. It is not authorization: `curl` ignores it completely, which is why the API still validates everything it is sent.
 
+**It does not stop mattering in production, even once the two halves are same-origin.** Routing `/api` through CloudFront removes the *preflight*, not the check — a browser still sends `Origin` on a simple `POST`, and the server still compares it against this allowlist. Getting that wrong took the deployed site down with a `403` on every sign-in; see [Phase 11](#phase-11--cloud). The value has to be supplied per environment, which is exactly why it is externalised rather than hardcoded.
+
 ### 2. Continuous integration
 
 `.github/workflows/ci.yml`, on every push to any branch plus pull requests to `main`. Two jobs, sharing no state, so they run in parallel and a red build says which application broke without anyone opening a log.
@@ -409,14 +411,16 @@ Recorded so the gaps are on the record rather than implied by silence:
 
 ---
 
-## Phase 11 — cloud (in progress)
+## Phase 11 — cloud
 
-Both halves are deployed and **they are not yet connected.** All of the infrastructure is Terraform (`terraform/` — `main.tf`, `api.tf`, `variables.tf`, `outputs.tf`), written that way from the start rather than clicked together in the console and codified afterwards, which front-runs Phase 12.
+**Deployed and working end to end.** All of the infrastructure is Terraform (`terraform/` — `main.tf`, `api.tf`, `variables.tf`, `outputs.tf`), written that way from the start rather than clicked together in the console and codified afterwards, which front-runs Phase 12.
 
 | Half | Where | State |
 |---|---|---|
-| `bankui/dist` | S3 + CloudFront | Live, but serving a **stale build** — see below |
-| `bankapi` | EC2 `t3.micro`, AL2023, backed by Atlas | Running the current build; reachable from the distribution's prefix list only |
+| `bankui/dist` | S3 + CloudFront | Live, current build |
+| `bankapi` | EC2 `t3.micro`, AL2023, backed by Atlas | Live, current build; reachable from the distribution's prefix list only |
+
+`/api/*` is a second CloudFront behaviour pointing at the API origin, so the browser only ever talks to one domain. That is what makes every `fetch` in the front end a relative path with no build-time API URL baked into it — the bundle stays environment-independent, so the tested artifact is the promoted artifact.
 
 **The API is deployed as a container on EC2 rather than on ECS**, and the reason is an account restriction rather than a preference: `ecs:ListClusters` and `ecr:DescribeRepositories` both return `AccessDeniedException` for this training account. The decision that mattered — **always-on rather than scale-to-zero** — is unaffected, and it was made for the audience: this is a portfolio artifact that gets opened weeks after anyone last touched it, which is exactly when a scale-to-zero service is coldest, so the worst latency the system can produce would land on the first click of the person being impressed.
 
@@ -424,22 +428,35 @@ Both halves are deployed and **they are not yet connected.** All of the infrastr
 
 **The SPA fallback is a `403 → 200 → /index.html` error mapping, and the status code is the trap.** A private bucket does **not** answer `404` for a missing key — telling a caller whether an object exists is information S3 will not give someone with no read permission, so absence and denial are deliberately indistinguishable and both arrive as `403`. Most tutorials map `404`, which against this configuration silently does nothing, and the deep link then fails in a way that looks like a routing bug.
 
-### Two things are outstanding, and they stack
+Which build is live on the instance was confirmed by **reading the running app's own OpenAPI spec** rather than by sending requests — that instance talks to real data, and `/v3/api-docs` proves the contract without writing a record. Where an application publishes its own contract, that is the cheapest honest answer to *"which build is this?"*.
 
-1. **The `/api` CloudFront behaviour is written but not applied.** `main.tf` contains the `ordered_cache_behavior` for `/api/*`; the live distribution does not. So `/api/v1/customers` returns `200` with `text/html` — the SPA fallback catching the path — and the browser tries to parse HTML as JSON. **Note that the symptom is a `200`**: checking the API by status code alone reports success for every path under `/api`. The content type and the byte count are what discriminate.
-2. **The deployed bundle predates the sign-in and dashboard work.** The live asset is byte-for-byte the build from before that rework, so the deployed nav still reads Home / Customers / About / Contact / Log in and the `/customers` page still exists there. **Nothing observed on the live site is evidence about the current code.**
+### Two things that broke on the way, both worth keeping
 
-**The instance itself has already been updated** to the build carrying the security fixes above — it had been running a pre-fix image. Which build is live was confirmed by **reading the running app's own OpenAPI spec** rather than by sending requests: that instance talks to real data, and `/v3/api-docs` proves the contract without writing a record. Where an application publishes its own contract, that is the cheapest honest answer to *"which build is this?"*.
+**CORS is still load-bearing in production, and the obvious reasoning says otherwise.** Routing `/api` through CloudFront makes the two halves same-origin, which removes the *preflight* — and it is tempting to conclude CORS no longer matters. **That is true of preflight and false of simple requests.** A browser sends an `Origin` header on a same-origin `POST` regardless, and the server still checks it. The deployed container had no `BANKAPI_CORS_ALLOWED_ORIGINS` set, so it fell back to the committed default of `http://localhost:5173`, rejected the distribution's own origin, and returned **`403` on every sign-in**.
 
-> **The ordering rule, worth stating because getting it backwards would have been serious.** Applying the `/api` behaviour before updating the instance would have **published the old vulnerable build to the internet** — the money-creation primitive and the username lockout, both live and both reachable with no credential. Until that behaviour exists the API is unreachable from outside, since the security group admits only CloudFront's prefix list, so **an unfinished piece of infrastructure was the last thing keeping a vulnerable API private.** Nothing chose that. **When a change makes something reachable, sequence it after the thing being reached is correct** — reachability is not a neutral step, it is the step that turns every latent defect behind it into a live one.
+> **The diagnostic worth stealing: `curl` worked while the browser did not, because `curl` sends no `Origin` header.** That asymmetry made it look like a CloudFront fault, since nothing about the request appeared to differ. **When curl succeeds and the browser fails, suspect a header the browser adds and curl omits — `Origin` first.** It is the same asymmetry that makes CORS browser-only protection, read from the other end, and it is why curl is a poor instrument for confirming a browser-facing fix.
 
-**Deploy the bundle in the same operation as the apply, not afterwards.** The API is now current and the bundle is not, so connecting them publishes an old client against a new contract — the same client/server mismatch that has already cost one diagnosis in this project, except this time in public and looking like the apply broke something.
+**The SPA fallback swallows API `403`s, and this is a Phase 10 landmine.** The `403 → 200 → /index.html` mapping is declared on the **distribution**, not on the S3 behaviour, so it applies to `/api/*` too: the API's `403` came back as a `200` with an HTML body, and `response.json()` threw `Unexpected token '<'` — an error three layers from its cause, naming nothing that was wrong. Today's blast radius is narrow and was checked rather than assumed: only `403` is mapped, and genuine API `404`s and `400`s survive intact.
 
-Two known operational hazards, recorded rather than discovered later:
+> **It is dormant only because nothing legitimately returns `403` yet.** Once authorisation exists, `403` becomes a meaningful API answer — *"you are not allowed to do that"* — and every one of them will be silently converted into a `200` and an HTML page. **The phase that introduces `403` as a real status is the phase this breaks**, and it will present as JSON parse errors rather than as authorisation failures. Scope the error response away from `/api/*` when Phase 10 starts, not when it is diagnosed.
 
-- **No Elastic IP was available, so the instance's public DNS is not stable across a stop/start.** A restart moves the address the distribution points at. The symptom (API unreachable) looks nothing like the cause (the origin moved).
+Both are the same mistake at different scopes: **a rule defined at one level and reasoned about at a narrower one.** The CORS entry reasoned about preflight and concluded something about CORS; the error mapping solved a bucket problem and became a distribution-wide rule. Check what a rule *applies to*, not what it was written for.
+
+### The ordering rule
+
+> Applying the `/api` behaviour before updating the instance would have **published the old vulnerable build to the internet** — the money-creation primitive and the username lockout, both live and both reachable with no credential. Until that behaviour exists the API is unreachable from outside, since the security group admits only CloudFront's prefix list, so **an unfinished piece of infrastructure was the last thing keeping a vulnerable API private.** Nothing chose that. **When a change makes something reachable, sequence it after the thing being reached is correct** — reachability is not a neutral step, it is the step that turns every latent defect behind it into a live one.
+
+In the event the bundle went out *before* the apply, so a new client was briefly live against a distribution with no `/api` route and every call fell through to the SPA fallback. Harmless, and it sharpened the rule: it is not "update the client last", it is that **the two halves must move together, whichever one is ahead.**
+
+Three known operational hazards, recorded rather than discovered later:
+
+- **No Elastic IP was available, so the instance's public DNS is not stable across a stop/start.** A restart moves the address the distribution points at, and the symptom (API unreachable) looks nothing like the cause (the origin moved). **Note what counts as a restart: AWS requires an instance to be stopped to modify its user data, so any `user_data` change is a stop/start** — including one that edits nothing but a comment. "In-place rather than replaced" protects the disk and the files on it; it does not mean nothing moves.
+
+  > This has happened once, and the site never noticed, because the CloudFront origin is `aws_instance.api.public_dns` — **a reference, not a pasted hostname.** The apply that moved the address updated the distribution to follow it, in the right order. The coupling that makes the plan noisy (`domain_name = (known after apply)`, forcing an origin re-add and a 46-second redeploy) is the *same* coupling that makes the change self-healing. **A reference is a dependency the tool can see; a literal is one only a human remembers** — so prefer the noisy reference, and be suspicious of an infrastructure change with a suspiciously clean plan.
 - **`minimum_protocol_version` is pinned to `TLSv1`**, a consequence of using the default CloudFront certificate. It cannot be raised without a custom ACM certificate in `us-east-1` — a property of the certificate, not a setting somebody forgot to tighten.
 - **Replacing the instance is destructive, despite the Terraform.** `user_data` deliberately never writes `/opt/bankapi/.env`, so a replacement destroys the credential file and leaves the service dead until somebody hand-writes it. Code updates are therefore applied in place. **A machine is only safely disposable when everything on it is reproducible from code**, and the one file deliberately kept out of code is what makes this one a pet.
+
+  > **That single omission is the root of more than it looks.** `.env` is not reproducible from code → instance replacement is destructive → `user_data` cannot be edited freely → `user_data_replace_on_change` has been set to `false`, disabling the very drift protection it exists to provide. **Four entries, one cause.** The curriculum's own answer is already the recorded plan for this phase — put the connection string in **AWS Systems Manager Parameter Store**, *not a raw env var on an instance* — and fetching it in `user_data` dissolves all four: `.env` becomes reproducible, replacement becomes routine, and the flag can go back to `true`. Until then the `false` is a stopgap, labelled as one in `api.tf`.
 
 The live URL is deliberately not printed in this file. The endpoints it fronts have no authorisation, and publishing a document that describes that gap alongside the address it applies to would be handing over both halves at once.
 

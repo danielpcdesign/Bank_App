@@ -219,7 +219,22 @@ export default function EditCustomerPage() {
         <button type="submit">Save</button>
       </form>
 
-      {message && <p className="message">{message}</p>}
+      {/* .error, not .message, and the bug this fixes was one class.
+
+          A save that fails is the only thing this line can ever show: success navigates away
+          instead of saying so, and handleChange retires a message the moment a field is
+          touched. So "That customer no longer exists." was rendering in the neutral style this
+          app uses for information - the style a DECLINED withdrawal wears, which is deliberately
+          not a failure. A real failure dressed as an ordinary notice is how somebody leaves a
+          page believing they saved.
+
+          Note what is NOT here: the `failed` flag every other form in this app carries.
+          Those forms genuinely have both outcomes on one line - CreateCustomerForm says
+          "Customer created" and "That username is already taken" through the same <p>, and
+          TransactionForm has three outcomes wearing two styles. This page has one, because
+          navigating away is its success message. A flag that can only ever hold true is not
+          consistency, it is a second thing to keep in step with the first. */}
+      {message && <p className="error">{message}</p>}
 
       <p><Link to="/dashboard">Back to the dashboard</Link></p>
     </>

@@ -583,13 +583,47 @@ export default function DashboardPage() {
           />
         )
         : (
-          // onCompleted is load: a deposit or withdrawal refreshes from the server rather
-          // than adjusting the number locally. A balance is arithmetic, and the server may
-          // have done more to it than this one transaction; a balance the client worked out
-          // for itself is a second source of truth for the one number that must not have one.
+          /*
+           * onCompleted is load: a deposit or withdrawal refreshes from the server rather
+           * than adjusting the number locally. A balance is arithmetic, and the server may
+           * have done more to it than this one transaction; a balance the client worked out
+           * for itself is a second source of truth for the one number that must not have one.
+           *
+           * isSelf is the SAME COMPARISON the "Viewing the accounts of" line above makes, and
+           * it is passed rather than recomputed there. CustomerDashboard cannot derive it -
+           * it is handed the subject and never sees the signed-in id, which is the correct
+           * arrangement: a presentational component should not be reading identity. Without
+           * it every string on that screen said "your accounts" to an administrator looking
+           * at somebody else's.
+           *
+           * =====================================================================
+           * THESE TWO DECISIONS ARE COUPLED. DO NOT TAKE THEM SEPARATELY.
+           * =====================================================================
+           *
+           * Passing onCompleted here is what puts the deposit/withdraw form on an account
+           * that is not the viewer's, whenever an administrator inspects a customer. It is an
+           * open question whether it should - an admin moving somebody else's money through
+           * the same control the owner uses is arguably an operation that ought to look
+           * different, which is exactly why AdminDashboard withholds these controls from the
+           * admin's OWN view.
+           *
+           * What makes it more than a style question now: an account is created at ZERO and
+           * money enters only through deposit, because the create endpoint stopped taking an
+           * opening balance. AdminDashboard has no deposit control. So THIS IS THE ONLY PATH
+           * IN THE APPLICATION BY WHICH A NEWLY OPENED ACCOUNT CAN BE FUNDED - an admin opens
+           * it, follows the owner's name in the accounts table to their dashboard, and
+           * deposits here.
+           *
+           * Removing onCompleted from this call would therefore not merely tighten a screen.
+           * It would leave every new account at zero with no way to fund it through any
+           * interface, and the break would show up nowhere near this line - AddAccountForm
+           * would keep reporting "Account opened" perfectly correctly. If that tightening is
+           * ever wanted, the admin side needs a funding control FIRST, and then this can go.
+           */
           <CustomerDashboard
             customer={subject}
             accounts={accounts}
+            isSelf={me.id === subject.id}
             onCompleted={load}
           />
         )}

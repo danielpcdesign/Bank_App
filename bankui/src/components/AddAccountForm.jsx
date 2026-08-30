@@ -23,10 +23,57 @@ import { openAccountForCustomer } from '../services/api.js'
  * owner costs no request. It is also the reason this takes `customers` as a prop rather than
  * fetching them: the parent already has them, and a component that fetched its own copy would
  * be able to disagree with the table above it.
+ *
+ * ==========================================================================================
+ * THERE IS NO OPENING BALANCE FIELD ANY MORE, AND IT WAS REMOVED RATHER THAN REWIRED
+ * ==========================================================================================
+ *
+ * There was one, and for a while it worked. Then the create endpoint narrowed to
+ * CreateAccountRequest(id, type, overdraftLimit) and the field stopped being read - without
+ * failing. Jackson ignores an unknown property, so the POST still returned 201, the account
+ * still opened, and the number the admin typed went nowhere. An account created with "500" in
+ * that box opened at zero and said "Account opened."
+ *
+ * A CONTROL THAT ACCEPTS A NUMBER AND DISCARDS IT IS WORSE THAN NO CONTROL. It is the same
+ * failure this codebase has now met three times - the role selector that submitted and changed
+ * nothing, the accountIds echo the server had stopped reading, and this - and the rule it keeps
+ * producing is the same one: a control that appears to work while doing nothing teaches the
+ * operator that the system lies, rather than that the operation is unavailable.
+ *
+ * THE ALTERNATIVE, AND WHY IT WAS REFUSED. The field could have been kept by opening the
+ * account and then issuing a deposit for the stated amount - two requests behind one button.
+ * It was rejected on two grounds, and the second is the one that decided it:
+ *
+ *   IT WOULD REBUILD THE CAPABILITY THE SERVER JUST REMOVED. Narrowing the request record was
+ *   a decision that money enters an account through deposit and through nothing else. A client
+ *   that reassembles an opening balance out of two calls is not honouring that contract, it is
+ *   working around it - and the workaround lives in the one layer that cannot enforce anything.
+ *
+ *   IT HAS NO TRANSACTION AROUND IT. If the create succeeds and the deposit fails - a refused
+ *   amount, a dropped connection, a closed tab between the two - the result is a real account,
+ *   owned, at zero, that the admin believes holds 500. There is nothing here that can roll the
+ *   first request back; DELETE is a second request that can fail in its own right. The honest
+ *   version of that feature has to report "the account exists but the money did not arrive",
+ *   which is a worse sentence than the one the user reads now, and it is a state somebody then
+ *   has to reconcile by hand. A compound operation belongs on the server, where it can be one.
+ *
+ * WHAT IT COSTS THE ADMIN, stated plainly because it is a real cost and not nothing: opening a
+ * funded account is now two steps in two places. Open it here, then follow the owner's name in
+ * the accounts table to their dashboard and deposit. That path already exists and already works
+ * - it is the same deposit control the customer uses - so what was lost is a shortcut, not a
+ * capability.
+ *
+ * AND IT IS THE ONLY PATH, which is why that sentence is load-bearing rather than reassuring.
+ * Nothing writes a balance directly - not this create, and not PUT /accounts/{id}, which binds
+ * UpdateAccountRequest(type, overdraftLimit). The admin dashboard deliberately carries no
+ * deposit control of its own. So an account opened here is funded by exactly one route, and if
+ * that route is ever closed off, every account this form creates is stranded at zero with
+ * nothing here reporting a problem - this form would go on saying "Account opened", perfectly
+ * correctly. DashboardPage holds the full note, beside the line that keeps the route open.
  */
 export default function AddAccountForm({ customers, onCreated }) {
 
-  // one object rather than five useState calls, so the shape is close to the body being sent
+  // one object rather than four useState calls, so the shape is close to the body being sent
   // and there is no assembly step. Empty strings throughout, not undefined: React treats a
   // controlled input whose value is undefined as UNcontrolled and warns when it changes.
   //
@@ -36,7 +83,6 @@ export default function AddAccountForm({ customers, onCreated }) {
     id: '',
     customerId: '',
     type: 'savings',
-    balance: '',
     overdraftLimit: '',
   })
 
@@ -82,15 +128,18 @@ export default function AddAccountForm({ customers, onCreated }) {
       await openAccountForCustomer(form.customerId, {
         id: form.id,
         type: form.type,
-        balance: form.balance === '' ? 0 : form.balance,
         overdraftLimit: savings || form.overdraftLimit === '' ? 0 : form.overdraftLimit,
       })
 
-      setForm(prev => ({ ...prev, id: '', balance: '', overdraftLimit: '' }))
+      setForm(prev => ({ ...prev, id: '', overdraftLimit: '' }))
       // the customer is deliberately NOT reset. Opening two accounts for the same person is
       // the common case, and clearing the field they would only have to set again is the kind
       // of tidiness that costs the user work.
-      say('Account opened.')
+      //
+      // the message says the balance is zero rather than leaving the admin to read it off the
+      // table, because "opened" alone is what the old silently-discarded field left them
+      // believing. It names where money goes in, since that is now somewhere else entirely.
+      say('Account opened with a zero balance. Deposit from the owner\'s dashboard.')
       if (onCreated) onCreated()
     } catch (err) {
       // the API distinguishes four outcomes here and the message follows it exactly. The
@@ -148,17 +197,15 @@ export default function AddAccountForm({ customers, onCreated }) {
         </select>
       </label>
 
-      <label>
-        Opening balance:
-        <input
-          type="number"
-          name="balance"
-          value={form.balance}
-          onChange={handleChange}
-          step="1"
-          disabled={busy}
-        />
-      </label>
+      {/* no opening balance input. It is gone rather than disabled, and the difference is the
+          same one EditCustomerPage draws about the role: a disabled control says "not available
+          to you", which is a claim about permission, where the truth is that no endpoint accepts
+          an opening balance from anybody. A sentence says that; a greyed-out box implies
+          somebody else could type in it. */}
+      <p className="muted">
+        Accounts open at a zero balance. Money goes in through a deposit on the owner&rsquo;s
+        dashboard.
+      </p>
 
       <label>
         Overdraft limit:

@@ -1,7 +1,6 @@
 package com.bank.controller;
 import java.net.URI;
 import java.util.List;
-import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -93,9 +92,11 @@ public class AccountController
         description = "The owning customer is REQUIRED, as ?customerId=. An account owned by nobody is not a "
                     + "meaningful record in this domain - it would appear in no customer's accountIds and be "
                     + "reachable only by listing every account - so it is made unrepresentable rather than "
-                    + "merely discouraged. The client supplies the account id; none is generated. Identical in "
-                    + "behaviour to POST /customers/{customerId}/accounts, which it delegates to - the two are "
-                    + "the same operation addressed two ways, not two implementations to keep in step.")
+                    + "merely discouraged. The client supplies the account id; none is generated. THE ACCOUNT "
+                    + "OPENS AT ZERO - the body has no balance field, so no caller can state an opening "
+                    + "figure, and money enters only through /accounts/{id}/deposit. Identical in behaviour to "
+                    + "POST /customers/{customerId}/accounts, which it delegates to - the two are the same "
+                    + "operation addressed two ways, not two implementations to keep in step.")
     @ApiResponses({
         @ApiResponse(
             responseCode = "201",
@@ -109,8 +110,10 @@ public class AccountController
                 schema = @Schema(implementation = Account.class))),
         @ApiResponse(
             responseCode = "400",
-            description = "Body rejected: missing or non-positive id, or missing type. Or customerId absent "
-                        + "from the query. The response names no field, deliberately.",
+            description = "Body rejected: missing or non-positive id, missing type, or a POSITIVE "
+                        + "overdraftLimit - the limit is a floor, so a positive one sits above zero and would "
+                        + "refuse ordinary withdrawals. Or customerId absent from the query. The response "
+                        + "names no field, deliberately.",
             content = @Content),
         @ApiResponse(
             responseCode = "404",
@@ -122,29 +125,30 @@ public class AccountController
             content = @Content)
     })
     @PostMapping("/accounts")
-    public ResponseEntity<Account> addAccount(@RequestParam int customerId, @Valid @RequestBody Account account)
+    public ResponseEntity<Account> addAccount(@RequestParam int customerId, @Valid @RequestBody CreateAccountRequest request)
     {
         // delegates rather than duplicating: same guards, same order, same status codes.
         // if the ownership rule ever changes it changes in exactly one place.
-        return openAccountForCustomer(customerId, account);
+        return openAccountForCustomer(customerId, request);
     }
 
     @Operation(
         summary = "Replace an account",
-        description = "Full replacement, not a partial update. The body's id must equal the path's. Note this "
-                    + "writes the balance directly and is the one route that moves money without going through "
-                    + "the account's own rules - deposit and withdraw are the guarded path.")
+        description = "Full replacement of the two fields a client owns - type and overdraftLimit. THE BALANCE "
+                    + "IS NOT ONE OF THEM and there is no field for it: a replace leaves the money exactly "
+                    + "where it was, and deposit and withdraw remain the only routes that move it. The body "
+                    + "carries no id either, so the path is the only identity and there is nothing to mismatch.")
     @ApiResponses({
         @ApiResponse(
             responseCode = "200",
-            description = "Replaced. Returns the stored record.",
+            description = "Replaced. Returns the stored record, balance untouched.",
             content = @Content(
                 mediaType = "application/json",
                 schema = @Schema(implementation = Account.class))),
         @ApiResponse(
             responseCode = "400",
-            description = "Either the body failed validation, or its id does not match the path id. "
-                        + "The response distinguishes neither, deliberately.",
+            description = "Body rejected: missing type, or a POSITIVE overdraftLimit. The response names no "
+                        + "field, deliberately.",
             content = @Content),
         @ApiResponse(
             responseCode = "404",
@@ -152,14 +156,10 @@ public class AccountController
             content = @Content)
     })
     @PutMapping("/accounts/{id}")
-    public ResponseEntity<Account> editAccount(@PathVariable int id, @Valid @RequestBody Account account)
+    public ResponseEntity<Account> editAccount(@PathVariable int id, @Valid @RequestBody UpdateAccountRequest request)
     {
-        if (!Objects.equals(account.getId(), id))
-        {
-            return ResponseEntity.badRequest().build(); //mismatch between path and body. 400
-        }
-
-        return accountService.editAccount(id, account)
+        // no body id, so no mismatch to check - the path is the only identity there is.
+        return accountService.editAccount(id, request.type(), request.floor())
             .map(ResponseEntity::ok) //200
             .orElseGet(() -> ResponseEntity.notFound().build()); //404
     }
@@ -220,9 +220,11 @@ public class AccountController
 
     @Operation(
         summary = "Open an account for a customer",
-        description = "Creates the account and adds its id to the customer's list in one call. 404 when the "
-                    + "customer does not exist, 409 when the account id is taken - established in that order, "
-                    + "because a create against a missing customer is not a conflict.")
+        description = "Creates the account and adds its id to the customer's list in one call. THE ACCOUNT "
+                    + "OPENS AT ZERO - the body has no balance field, so an opening figure cannot be stated "
+                    + "and money enters only through /accounts/{id}/deposit. 404 when the customer does not "
+                    + "exist, 409 when the account id is taken - established in that order, because a create "
+                    + "against a missing customer is not a conflict.")
     @ApiResponses({
         @ApiResponse(
             responseCode = "201",
@@ -236,7 +238,8 @@ public class AccountController
                 schema = @Schema(implementation = Account.class))),
         @ApiResponse(
             responseCode = "400",
-            description = "Body rejected: missing or non-positive id, or missing type.",
+            description = "Body rejected: missing or non-positive id, missing type, or a POSITIVE "
+                        + "overdraftLimit.",
             content = @Content),
         @ApiResponse(
             responseCode = "404",
@@ -248,25 +251,25 @@ public class AccountController
             content = @Content)
     })
     @PostMapping("/customers/{customerId}/accounts")
-    public ResponseEntity<Account> openAccountForCustomer(@PathVariable int customerId, @Valid @RequestBody Account account)
+    public ResponseEntity<Account> openAccountForCustomer(@PathVariable int customerId, @Valid @RequestBody CreateAccountRequest request)
     {
-        if (account.getId() == null)
-        {
-            return ResponseEntity.badRequest().build(); //400
-        }
+        // the null-id guard that used to sit here is gone: @NotNull on the record's id runs
+        // before this method does, so an absent id can no longer reach it.
 
         // asked first so a missing customer is a 404 rather than being folded into the
-        // service's single false, which the next line reads as a conflict.
+        // service's single empty Optional, which the next line reads as a conflict.
         if (customerService.getCustomerById(customerId).isEmpty())
         {
             return ResponseEntity.notFound().build(); //404
         }
 
-        if (!accountService.openAccountForCustomer(customerId, account))
-        {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build(); //409
-        }
-        return ResponseEntity.created(URI.create("/api/v1/accounts/" + account.getId())).body(account); //201
+        // the created account comes BACK from the service rather than being echoed from the
+        // body, because the body is no longer a whole account - the server built it.
+        return accountService.openAccountForCustomer(customerId, request.id(), request.type(), request.floor())
+            .map(account -> ResponseEntity
+                .created(URI.create("/api/v1/accounts/" + account.getId()))
+                .body(account)) //201
+            .orElseGet(() -> ResponseEntity.status(HttpStatus.CONFLICT).build()); //409
     }
 
     @Operation(

@@ -13,13 +13,39 @@ import { getSignedInId } from '../services/viewer.js'
  * (nothing here is secure) but because it makes the password pointless while the password is
  * the one part of this that genuinely works.
  *
- * WHAT IT DOES NOT DO IS BLOCK ANYTHING. /dashboard/4 typed into the address bar still renders
- * customer 4's dashboard whether or not anyone signed in, and DashboardPage does not check.
- * That is deliberate. A client-side redirect away from a URL is not access control - the data
- * behind it is one unauthenticated GET away for anyone who wants it - and writing one would
- * put a thing that looks like a guard in front of a door that has no lock. The banner on every
- * dashboard says so out loud instead. When the API starts refusing anonymous callers, the
- * refusal will come from there, and this file will not be the place it is implemented.
+ * ==========================================================================================
+ * CORRECTED - THIS PARAGRAPH USED TO SAY THE OPPOSITE OF WHAT THE APP NOW DOES
+ * ==========================================================================================
+ *
+ * It read: "WHAT IT DOES NOT DO IS BLOCK ANYTHING. /dashboard/4 typed into the address bar
+ * still renders customer 4's dashboard whether or not anyone signed in, and DashboardPage does
+ * not check. That is deliberate." Every clause of that is now false, and it is corrected here
+ * rather than deleted, because a comment that would talk the next reader out of a guard that
+ * EXISTS is worse than one that is merely out of date - the reader does not go looking for
+ * something they have just been told is absent on purpose.
+ *
+ * What is actually true now:
+ *
+ *   SIGNED OUT, /dashboard/4 RENDERS NOTHING. RequireSignIn wraps the whole route table below
+ *   /login and /register, and it returns <Navigate> INSTEAD OF <Outlet>, so the page is never
+ *   mounted rather than mounted and hidden.
+ *
+ *   SIGNED IN AS SOMEBODY ELSE, DashboardPage DOES CHECK. It fetches the signed-in customer,
+ *   decides from THAT record - never from the id in the URL - and returns a non-admin who asks
+ *   for another person's dashboard to their own, before any of the subject's data is requested.
+ *
+ *   THE BANNER THAT "SAYS SO OUT LOUD" IS GONE. It was removed at the user's instruction; the
+ *   maintainer-facing half of that argument now lives in services/api.js and is not to be
+ *   reintroduced on screen.
+ *
+ * WHAT SURVIVES THE CORRECTION, because it was the sound part and none of the above touches it:
+ * a client-side redirect is still not access control. The data behind these routes is one
+ * unauthenticated GET away for anybody who wants it, and every gate named above is a PRODUCT
+ * boundary - it decides what this interface offers, and curl never runs it. The old paragraph's
+ * mistake was not its principle, it was concluding from "a redirect is not security" that the
+ * app should not decide which screen a person gets. Those are different claims, and DashboardPage
+ * records what the second one cost when it was believed. When the API starts refusing anonymous
+ * callers, the refusal still comes from there, and this file is still not where it lands.
  *
  * THE /login BRANCH IS NOW UNREACHABLE, and it stays. This route sits inside RequireSignIn,
  * which has already established that an id is present - so by the time this renders, it cannot

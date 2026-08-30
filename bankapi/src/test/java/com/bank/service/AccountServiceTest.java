@@ -43,50 +43,34 @@ class AccountServiceTest
         return new Account(id, AccountType.SAVINGS, balance, 0.0);
     }
 
+    /*
+     * FOUR TESTS WERE DELETED HERE, all of them describing calls that can no longer be made.
+     *
+     * Two covered addNewAccount(Account), which is gone. It took a fully-built Account from
+     * its caller - balance included - and handed it straight to storage, which is exactly the
+     * primitive that let a client mint money. A public service method whose parameter is a
+     * client-shaped account carrying a balance is the bug waiting to be rewired, so it was
+     * removed rather than left sitting unused. The same call was made about Customer.setRole.
+     *
+     * Two more covered the id mismatch between body and path. editAccount takes a type and a
+     * floor now rather than an Account, so there is no body id left to disagree with the
+     * path - the case is unrepresentable rather than untested.
+     */
     @Test
-    void addNewAccount_returnsTrue_whenTheRepositoryInsertedTheRecord()
+    void editAccount_passesTheTwoOwnedFieldsToTheRepository()
     {
-        Account account = savings(104, 0.0);
-        when(accountRepository.addAccount(account)).thenReturn(Optional.of(account));
+        Account updated = new Account(102, AccountType.CHECKING, 250.0, -100.0);
+        when(accountRepository.editAccount(102, AccountType.CHECKING, -100.0)).thenReturn(Optional.of(updated));
 
-        assertThat(service.addNewAccount(account)).isTrue();
+        assertThat(service.editAccount(102, AccountType.CHECKING, -100.0)).contains(updated);
     }
 
     @Test
-    void addNewAccount_returnsFalse_whenTheIdWasAlreadyTaken()
+    void editAccount_reportsAbsenceStraightThrough()
     {
-        Account account = savings(101, 0.0);
-        when(accountRepository.addAccount(account)).thenReturn(Optional.empty());
+        when(accountRepository.editAccount(999, AccountType.SAVINGS, 0.0)).thenReturn(Optional.empty());
 
-        assertThat(service.addNewAccount(account)).isFalse();
-    }
-
-    // the mismatch is rejected by the service itself, so storage is never consulted.
-    @Test
-    void editAccount_rejectsAnIdMismatch_withoutTouchingTheRepository()
-    {
-        assertThat(service.editAccount(102, savings(5, 0.0))).isEmpty();
-
-        verifyNoInteractions(accountRepository);
-    }
-
-    // Objects.equals rather than !=, so a null body id is a rejection and not an NPE.
-    @Test
-    void editAccount_rejectsANullBodyId_withoutThrowing()
-    {
-        assertThat(service.editAccount(102, new Account(null, AccountType.SAVINGS, 0.0, 0.0))).isEmpty();
-
-        verifyNoInteractions(accountRepository);
-    }
-
-    @Test
-    void editAccount_delegatesToTheRepository_whenTheIdsAgree()
-    {
-        Account body = savings(102, 250.0);
-        Account updated = savings(102, 250.0);
-        when(accountRepository.editAccount(102, body)).thenReturn(Optional.of(updated));
-
-        assertThat(service.editAccount(102, body)).contains(updated);
+        assertThat(service.editAccount(999, AccountType.SAVINGS, 0.0)).isEmpty();
     }
 
     //----------------------------------------------------------------CUSTOMER SCOPED----------------------------------------------------------------
@@ -131,25 +115,27 @@ class AccountServiceTest
     }
 
     @Test
-    void openAccountForCustomer_returnsFalseAndCreatesNothing_whenTheCustomerDoesNotExist()
+    void openAccountForCustomer_returnsEmptyAndCreatesNothing_whenTheCustomerDoesNotExist()
     {
         when(customerRepository.findById(99)).thenReturn(Optional.empty());
 
-        assertThat(service.openAccountForCustomer(99, savings(104, 0.0))).isFalse();
+        assertThat(service.openAccountForCustomer(99, 104, AccountType.SAVINGS, 0.0)).isEmpty();
 
         verifyNoInteractions(accountRepository);
     }
 
     // the account id collided, so nothing was created - and the customer must not be left
     // holding an id for an account that was never inserted.
+    // any(Account.class) is required, not lazy, and it is required for a NEW reason: the
+    // service builds the Account itself now, so no instance the test holds could ever be
+    // the one the repository is handed - Account does not override equals().
     @Test
-    void openAccountForCustomer_returnsFalseAndDoesNotLink_whenTheAccountIdIsTaken()
+    void openAccountForCustomer_returnsEmptyAndDoesNotLink_whenTheAccountIdIsTaken()
     {
-        Account account = savings(101, 0.0);
         when(customerRepository.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of())));
-        when(accountRepository.addAccount(account)).thenReturn(Optional.empty());
+        when(accountRepository.addAccount(any(Account.class))).thenReturn(Optional.empty());
 
-        assertThat(service.openAccountForCustomer(1, account)).isFalse();
+        assertThat(service.openAccountForCustomer(1, 101, AccountType.SAVINGS, 0.0)).isEmpty();
 
         verify(customerRepository, never()).save(any(Customer.class));
     }
@@ -159,15 +145,40 @@ class AccountServiceTest
     @Test
     void openAccountForCustomer_addsTheNewIdToTheCustomersList()
     {
-        Account account = savings(104, 0.0);
         when(customerRepository.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of(101))));
-        when(accountRepository.addAccount(account)).thenReturn(Optional.of(account));
+        when(accountRepository.addAccount(any(Account.class))).thenAnswer(call -> Optional.of(call.getArgument(0)));
 
-        assertThat(service.openAccountForCustomer(1, account)).isTrue();
+        assertThat(service.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0)).isPresent();
 
         ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
         verify(customerRepository).save(saved.capture());
         assertThat(saved.getValue().getAccountIds()).containsExactly(101, 104);
+    }
+
+    /*
+     * THE MONEY-CREATION FIX, tested at the layer that now owns it.
+     *
+     * The service constructs the account, and it has no parameter through which a balance
+     * could arrive - so the zero asserted here is the only opening balance any account can
+     * have. That is what makes deposit the single entry point for money: not a rule this
+     * method follows, but the absence of any alternative.
+     *
+     * The floor IS the caller's and is carried through unchanged, which is the distinction
+     * worth pinning: "how far below zero may this go" is a genuine choice made when an
+     * account is opened, and a balance never was.
+     */
+    @Test
+    void openAccountForCustomer_alwaysOpensTheAccountAtAZeroBalance()
+    {
+        when(customerRepository.findById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith", List.of())));
+        when(accountRepository.addAccount(any(Account.class))).thenAnswer(call -> Optional.of(call.getArgument(0)));
+
+        service.openAccountForCustomer(1, 104, AccountType.CHECKING, -100.0);
+
+        ArgumentCaptor<Account> created = ArgumentCaptor.forClass(Account.class);
+        verify(accountRepository).addAccount(created.capture());
+        assertThat(created.getValue().getBalance()).isZero();
+        assertThat(created.getValue().getOverdraftLimit()).isEqualTo(-100.0);
     }
 
     @Test
@@ -291,12 +302,11 @@ class AccountServiceTest
     @Test
     void openAccountForCustomer_leavesThePasswordIntact()
     {
-        Account account = savings(104, 0.0);
         when(customerRepository.findById(1)).thenReturn(Optional.of(
             new Customer(1, "alice", "Alice Smith", List.of(101), Role.CUSTOMER, "alice123")));
-        when(accountRepository.addAccount(account)).thenReturn(Optional.of(account));
+        when(accountRepository.addAccount(any(Account.class))).thenAnswer(call -> Optional.of(call.getArgument(0)));
 
-        service.openAccountForCustomer(1, account);
+        service.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0);
 
         ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
         verify(customerRepository).save(saved.capture());
@@ -307,12 +317,11 @@ class AccountServiceTest
     @Test
     void openAccountForCustomer_doesNotDemoteAnAdmin()
     {
-        Account account = savings(104, 0.0);
         when(customerRepository.findById(4)).thenReturn(Optional.of(
             new Customer(4, "admin", "Admin User", List.of(), Role.ADMIN, "admin123")));
-        when(accountRepository.addAccount(account)).thenReturn(Optional.of(account));
+        when(accountRepository.addAccount(any(Account.class))).thenAnswer(call -> Optional.of(call.getArgument(0)));
 
-        service.openAccountForCustomer(4, account);
+        service.openAccountForCustomer(4, 104, AccountType.SAVINGS, 0.0);
 
         ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
         verify(customerRepository).save(saved.capture());
@@ -369,12 +378,11 @@ class AccountServiceTest
     @Test
     void openAccountForCustomer_changesAccountIdsAndNothingElse()
     {
-        Account account = savings(104, 0.0);
         when(customerRepository.findById(4)).thenReturn(Optional.of(
             new Customer(4, "admin", "Admin User", List.of(101), Role.ADMIN, "admin123")));
-        when(accountRepository.addAccount(account)).thenReturn(Optional.of(account));
+        when(accountRepository.addAccount(any(Account.class))).thenAnswer(call -> Optional.of(call.getArgument(0)));
 
-        service.openAccountForCustomer(4, account);
+        service.openAccountForCustomer(4, 104, AccountType.SAVINGS, 0.0);
 
         ArgumentCaptor<Customer> saved = ArgumentCaptor.forClass(Customer.class);
         verify(customerRepository).save(saved.capture());

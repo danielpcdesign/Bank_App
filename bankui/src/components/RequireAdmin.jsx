@@ -86,9 +86,14 @@ export default function RequireAdmin() {
   /*
    * 'checking' | 'allowed' | 'denied' | 'gone' | 'failed'
    *
-   * One state variable rather than a pair of booleans. Two booleans admit four combinations
-   * where only three are meaningful, which leaves a fourth that means nothing and will
-   * eventually be reachable.
+   * FIVE states, and one variable holding exactly those five. This comment used to describe a
+   * pair of booleans admitting four combinations "where only three are meaningful" - written
+   * when there were three states, and left behind when 'gone' and 'failed' were added. The
+   * arithmetic is worth correcting rather than deleting, because growth is precisely where the
+   * argument gets its force: five states need three booleans, three booleans admit eight
+   * combinations, and the three that mean nothing are all reachable by setting one flag and
+   * forgetting another. A single variable cannot be put into a state that does not exist, and
+   * it costs nothing extra to add the fourth or the fifth.
    */
   const [state, setState] = useState('checking')
 

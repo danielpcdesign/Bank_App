@@ -196,10 +196,55 @@ public class CustomerService
      * A guard that cannot be bypassed because the operation does not exist beats a guard
      * that has to run correctly every time. The DELETE half of that invariant is still live
      * and still enforced in deleteCustomerById, which is where isLastAdmin is now used.
+     *
+     * WHAT IS NOT GONE, and was never here: USERNAME UNIQUENESS. This method used to be a
+     * pure pass-through, so a rename could put a second customer on an existing username -
+     * the exact rule addNewCustomer has enforced since it was written. It is now enforced on
+     * both routes, which is where it always had to be. See below for why it matters.
+     *
+     * Empty Optional now means REFUSED, not "not found". The controller establishes existence
+     * first, exactly as it does for delete, deposit and withdraw, and reports this as 409.
      */
     public Optional<Customer> editCustomer(int id, String username, String fullName)
     {
-        return customerRepository.editCustomer(id, username, fullName);
+        if (isUsernameTakenByAnother(id, username))
+        {
+            return Optional.empty();
+        }
 
+        return customerRepository.editCustomer(id, username, fullName);
+    }
+
+    /*
+     * The uniqueness rule, asked the way an UPDATE has to ask it.
+     *
+     * addNewCustomer can ask "does this username exist at all?", because a record that does
+     * not exist yet cannot be the one holding it. An update cannot: a customer keeping its
+     * own username must still be allowed to change its full name, and a plain isPresent()
+     * would refuse that - a PUT that fails when nothing about the username changed. So the
+     * question is "does ANOTHER customer hold it", and the id is what tells the two apart.
+     *
+     * WHY THIS IS NOT COSMETIC, and it is the same reasoning recorded for the create path:
+     * only _id carries a unique index, so nothing in the database stops a second "alice".
+     * findByUsername returns a single Optional, so two customers sharing a username make it
+     * THROW - and sign-in becomes a 500 for BOTH of them, including the original. A rename
+     * was therefore a way for any anonymous caller to lock a real user out permanently.
+     *
+     * IT NEEDS NO IDENTITY TO ENFORCE, which is why it is fixed now rather than in phase 10.
+     * "Two customers must not share a username" is a fact about the state of the system, not
+     * a judgement about who is asking - the same category as the last-admin invariant above
+     * and the overdraft floor on Account. It holds for curl exactly as it holds for the UI.
+     *
+     * Honest about what it is NOT: this is a read-then-write, so two simultaneous renames to
+     * the same username can both pass it. Identical to the gap already recorded on
+     * CustomerRepository.nextCustomerId, and with the same answer - a unique index on
+     * username is what would actually close it, and there is not one. This makes the rule
+     * hold for callers arriving one at a time, which is every caller this application has.
+     */
+    private boolean isUsernameTakenByAnother(int id, String username)
+    {
+        return customerRepository.findByUsername(username)
+            .filter(other -> !Objects.equals(other.getId(), id))
+            .isPresent();
     }
 }

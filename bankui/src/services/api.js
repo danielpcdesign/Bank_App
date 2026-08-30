@@ -517,6 +517,16 @@ export const withdraw = (accountId, amount) => transact(accountId, 'withdraw', a
  *
  * Absent until now on the stated grounds that a function nothing calls is dead code. The
  * admin dashboard calls them, so they arrive with it.
+ *
+ * STILL ABSENT, AND CHECKED RATHER THAN ASSUMED: there is no update function here. Nothing in
+ * this UI issues PUT /api/v1/accounts/{id}, so the route's move to UpdateAccountRequest(type,
+ * overdraftLimit) - no balance, no id - costs this file nothing. Recorded because the check is
+ * the useful part: an endpoint changing shape is only safe for a client that does not call it,
+ * and "does not call it" is a claim worth verifying rather than remembering.
+ *
+ * If a screen ever wants it, note what that request record already settles: a balance cannot be
+ * written directly through any route. Editing an account means its type and its overdraft
+ * floor; moving its money means deposit and withdraw.
  * ========================================================================================== */
 
 /*
@@ -537,12 +547,25 @@ export const withdraw = (accountId, amount) => transact(accountId, 'withdraw', a
  *          the way out, and the pair of them is the entire reason no component has to know
  *          the model's sign convention. (Savings is forced to 0 by the constructor either
  *          way - "savings has no overdraft" is a fact about savings, not a caller's choice.)
+ *
+ * NO BALANCE, AND THIS USED TO SEND ONE. The endpoint binds CreateAccountRequest(id, type,
+ * overdraftLimit) - a narrow request record, the same fix that closed three bugs on Customer.
+ * An account opens at zero and money enters only through deposit, which makes deposit the
+ * single path a balance can change by.
+ *
+ * THE WAY IT FAILED IS THE PART WORTH KEEPING. A `balance` in this body did not error. Jackson
+ * ignores unknown properties, so the request returned 201, the account opened at zero, and the
+ * admin's "Opening balance" field silently did nothing. A field the server has STOPPED READING
+ * is indistinguishable at the call site from one it still honours - the request succeeds either
+ * way - so nothing here could have caught it. That is the argument for this module naming every
+ * field it sends: a spread would have carried the dead field along with nothing to notice it by,
+ * and the same absence of a compiler is why the front end has to be re-read against the
+ * contract rather than trusted to fail loudly.
  */
 export const openAccountForCustomer = (customerId, account) =>
   request(`/customers/${customerId}/accounts`, jsonRequest('POST', {
     id: Number(account.id),
     type: String(account.type).toUpperCase(),
-    balance: Number(account.balance),
     overdraftLimit: -Math.abs(Number(account.overdraftLimit)),
   }))
 

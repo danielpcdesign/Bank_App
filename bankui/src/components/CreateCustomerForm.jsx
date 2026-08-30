@@ -31,9 +31,14 @@ import { createCustomer } from '../services/api.js'
  *   put to refetch a table, are two different decisions about one event - which is exactly the
  *   shape onCreated exists for.
  *
- * So: one component, three call sites - the customers page, the admin dashboard, and the
- * public register page. If the operations diverge again, this splits again; today they have
- * not diverged, and two copies of one switch is not a design.
+ * So: one component, TWO call sites - the admin dashboard and the public register page. It was
+ * three, and the third was the standalone /customers page, which has since been deleted: any
+ * signed-in customer could reach it and create or delete anybody. Worth noting that losing a
+ * caller did not weaken the case for sharing, because the case never rested on the count. It
+ * rests on the 409/400/0 switch being the thing that drifts when it is copied - one copy learns
+ * about a new status, the other quietly does not, and both still compile. Two copies of that is
+ * a liability at two call sites exactly as it was at three. If the operations diverge again,
+ * this splits again.
  *
  * ==========================================================================================
  * NO ID INPUT AND NO ROLE SELECTOR, and the reason has changed

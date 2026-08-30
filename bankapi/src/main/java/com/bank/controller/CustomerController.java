@@ -240,14 +240,30 @@ public class CustomerController
         @ApiResponse(
             responseCode = "404",
             description = "No customer has that id. PUT does not create.",
+            content = @Content),
+        @ApiResponse(
+            responseCode = "409",
+            description = "Another customer already holds that username. The same conflict POST reports, on "
+                        + "the route that could also reach it - a rename is the other way two customers end "
+                        + "up sharing a name. Refused for EVERY caller, curl included: uniqueness is an "
+                        + "invariant about the state of the system rather than a rule about who is asking. "
+                        + "Renaming a customer to the username it already has is NOT a conflict.",
             content = @Content)
     })
     @PutMapping("/customers/{id}")
     public ResponseEntity<Customer> editCustomer(@PathVariable int id, @Valid @RequestBody UpdateCustomerRequest request)
     {
         // no body id, so no mismatch to check - the path is the only identity there is.
+
+        // existence is established here so that the service's empty Optional can mean one
+        // thing: refused. same shape as delete, deposit and withdraw.
+        if (customerService.getCustomerById(id).isEmpty())
+        {
+            return ResponseEntity.notFound().build(); //404
+        }
+
         return customerService.editCustomer(id, request.username(), request.fullName())
             .map(ResponseEntity::ok) //200
-            .orElseGet(() -> ResponseEntity.notFound().build()); //404
+            .orElseGet(() -> ResponseEntity.status(HttpStatus.CONFLICT).build()); //409 - username taken
     }
 }

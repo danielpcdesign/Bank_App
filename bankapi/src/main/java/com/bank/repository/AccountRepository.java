@@ -74,26 +74,41 @@ public class AccountRepository
     }
 
     // empty Optional when no document has that id.
-    // otherwise build the replacement from data using path as key
-    public Optional<Account> editAccount(int id, Account data)
+    // otherwise build the replacement from the two owned fields, keyed by the path id
+    public Optional<Account> editAccount(int id, AccountType type, double overdraftLimit)
     {
-        // existence is checked on the path id, and the replacement is keyed by the path id.
-        if (!mongo.existsById(id))
+        // findById rather than existsById: the STORED BALANCE is needed to build the
+        // replacement, and it no longer arrives from anywhere else.
+        Optional<Account> stored = mongo.findById(id);
+        if (stored.isEmpty())
         {
             return Optional.empty();
         }
-        // Rebuilt rather than mutated, and DELIBERATELY so - the opposite choice to
-        // CustomerRepository.editCustomer, for a reason worth stating.
-        //
-        // Customer is mutated because rebuilding it dropped fields a constructor did not
-        // take. Account cannot be mutated: it exposes no setter for balance on purpose,
-        // because a setter would be a way to move money that skips deposit and withdraw.
-        // Going through the constructor also re-applies the savings coercion, so a savings
-        // account can never be edited into having an overdraft.
-        //
-        // This names all four fields, which is currently every field Account has. It is the
-        // one place a fifth would be silently dropped, so add it here at the same time.
-        return Optional.of(mongo.save(new Account(id, data.getType(), data.getBalance(), data.getOverdraftLimit())));
+
+        /*
+         * THE BALANCE COMES FROM THE STORED DOCUMENT, NEVER FROM THE REQUEST, and that is
+         * this method's whole contribution to the fix.
+         *
+         * It used to take an Account bound straight from the body and write data.getBalance()
+         * to storage, so PUT was a second money-creation route beside the create one: replace
+         * account 101 with a balance of a million and the money existed. UpdateAccountRequest
+         * has no balance field, so nothing reaches this method to be written - but the
+         * replacement still has to carry SOME balance, and taking it from the stored document
+         * is what makes a replace leave the money exactly where it was.
+         *
+         * Rebuilt rather than mutated, and DELIBERATELY so - the opposite choice to
+         * CustomerRepository.editCustomer, for a reason worth stating.
+         *
+         * Customer is mutated because rebuilding it dropped fields a constructor did not
+         * take. Account cannot be mutated: it exposes no setter for balance on purpose,
+         * because a setter would be a way to move money that skips deposit and withdraw.
+         * Going through the constructor also re-applies the savings coercion, so a savings
+         * account can never be edited into having an overdraft.
+         *
+         * This names all four fields, which is currently every field Account has. It is the
+         * one place a fifth would be silently dropped, so add it here at the same time.
+         */
+        return Optional.of(mongo.save(new Account(id, type, stored.get().getBalance(), overdraftLimit)));
     }
 
     // deposit and withdraw mutate the account in place, so the changed object is written back

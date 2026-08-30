@@ -15,7 +15,46 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 | 5 | API docs — Swagger / OpenAPI | Complete |
 | 8 | React front end — Vite, react-router | Complete — full CRUD against the API |
 | 9 | DevOps — CORS, GitHub Actions CI, Docker, Compose | Complete — Kubernetes deferred |
-| 10–14 | Security, cloud, IaC, observability, microservices | Planned |
+| 10 | Security — hashing, BCrypt, AuthN/AuthZ, JWT | **Not started.** Read [Security](#security--what-is-and-is-not-enforced) before drawing any conclusion about this application's protections |
+| 11 | Cloud — AWS deployment | In progress — front end on S3 + CloudFront, API on EC2, **the two are not yet connected** |
+| 12 | IaC — Terraform | In progress alongside Phase 11 — the infrastructure was written as Terraform from the start rather than clicked together and codified afterwards |
+| 13–14 | Observability, microservices | Planned |
+
+Alongside those phases, and belonging to none of them, the domain caught up with the architecture: a full **`Account` vertical** (model → repository → service → controller, with deposit and withdraw), **customer roles**, a **sign-in endpoint**, and a front end rebuilt around **admin and customer dashboards**. That work is on the `app_branch` branch and is **not yet merged into `main`**.
+
+> **Deployment status, stated plainly because a live URL invites the wrong assumption.** The deployed front end is a **build made before** the sign-in and dashboard work, and the deployed distribution **cannot currently reach its API**. The live site is therefore not a demonstration of this repository's current state, and nothing about the application should be judged from it until both are refreshed. See [Phase 11](#phase-11--cloud-in-progress).
+
+## Security — what is and is not enforced
+
+**This application has no authorisation. Any caller can read or drain any account.** The money-moving endpoints take an account id in the path and nothing else — no credential, no token, no session — so `POST /api/v1/accounts/{id}/withdraw?amount=…` succeeds for anyone who can reach the API. `GET /api/v1/accounts` returns every account in the system. The same is true of every customer endpoint: any caller can list, edit or delete any customer.
+
+This is **a known and deliberate scope decision, not an oversight.** It is a training exercise, authentication and authorisation are Phase 10 of the roadmap below, and shipping the gap stated is the trade being made. It is recorded here because the alternative — a banking demo that says nothing about it — would leave a reader to assume protections that do not exist.
+
+**Why it is not partially fixed.** Enforcing *"this is your account"* requires knowing who is asking, and nothing in a request carries that. `POST /api/v1/customers/signin` compares a username and password and returns the customer, but it **issues no session and no token**, so the very next request is anonymous again. Adding a `customerId` to a path would only let a caller *name* someone else's account — it reads as a check while enforcing nothing, which is worse than the honest gap. The missing piece is one feature: an identity that survives a request.
+
+Everything protective in this application falls into exactly one of three categories, and conflating them overstates the posture:
+
+| | Holds against `curl`? | What it actually is |
+|---|---|---|
+| **Enforced** | **Yes** | Facts about system state, needing no identity: **roles cannot be set or changed through any endpoint**; **a balance is never client-supplied** — no request body in this API carries one, so an account opens at zero and only `deposit` and `withdraw` ever move it; **overdraft floors and whole-number amounts**; **username uniqueness on both create and update**; **a savings account cannot gain an overdraft**, coerced in the constructor; account create rejecting an unknown customer and a duplicate account id; the unique `_id` index. |
+| **Product boundary** | **No** | **The React app only — the API is unchanged.** The sign-in gate, the redirect to `/login`, the admin-only customer list and edit page, dashboard routing. These shape what the front end *offers*. They are not access control, and `curl` never sees them. |
+| **Not protected at all** | — | **Every account, every balance, every deposit and withdrawal, and every customer record.** |
+
+**The middle row is the one that invites the mistake**: it looks like security in a browser and is worth nothing to any client that is not the browser. The front-end source says so at each gate rather than leaving it to be inferred.
+
+**Two defects were found and closed during testing, and they are worth recording because they were *not* the scoped gap above.** Both were failures to validate a request rather than failures to identify a caller, so neither was blocked on Phase 10 and neither was covered by the decision to ship without authorisation. Using a real, decided, documented gap as cover for two ordinary bugs is the mistake that was available here, and the distinction is the reason it was not made:
+
+- **Account routes accepted a client-supplied `balance`, on all three of them.** Both create routes and `PUT /accounts/{id}` bound the `Account` entity directly, which carries constraints on `id` and `type` and none on the money fields. An arbitrarily large opening balance could be created and then withdrawn — **the correct withdrawal validation bypassed by funding the account rather than by defeating the guard** — and a fractional balance admitted, which is the one thing the whole-number money rule exists to exclude. **Closed by narrow request records with no balance field.** A balance smuggled into the body now binds to nothing: the request returns `201` and stores zero. It is not rejected, it is **unrepresentable** — no constraint to get wrong, and no error path to keep correct.
+- **`PUT /customers/{id}` did not check username uniqueness, though create did.** Renaming one customer onto another's username succeeded, and sign-in for that username then failed with a `500`, since the lookup returns one `Optional` and two documents matched. **Any caller could lock a real user out of sign-in permanently**, with no way for the victim to undo it. **Closed** — the rule is enforced on both writers, and the endpoint now answers `409`. A rule is only as enforced as its least-guarded writer.
+
+Neither was caught by the test suite, and the reason is the same in both: every existing test sends a complete, well-formed body. **A pass-through's test passes precisely because it is a pass-through**, and a suite that exercises only the payloads the author had in mind cannot see a validation that was never written.
+
+Two further consequences of Phase 10 being unreached, stated rather than left to discovery:
+
+- **Passwords are stored in plaintext.** Deliberately: a fake hash now would *look* protected, which is worse than storing none while the phase that introduces BCrypt has not arrived. They are never returned by any endpoint.
+- **No password can be changed.** A password is set at creation and never again — there is no route and no request field that carries one. That is a gap, not a guarantee, and it belongs with hashing rather than being fixed separately: a change-password route before hashing would exist only to move a plaintext secret around.
+
+> **The part worth carrying to another project.** These endpoints were tested early and **passed** — the overdraft rules were right, the guards held, refusals came back as designed. Nobody asked *who was allowed to make the request*, because at that point nothing in the application had authentication, so anonymous access was not a gap in the design, it was the ambient condition. **A missing control is hardest to see when it is missing everywhere.** It only became visible once everything around it was locked down. That is the argument for asking *"who may do this?"* as a question separate from *"does this do the right thing?"* — the second was asked and answered well, and answering it well is what made the first easy to skip.
 
 ## Prerequisites
 
@@ -34,22 +73,27 @@ Banking_App/
 ├── src/bank/                 Phase 1 — console app, plain javac, no build tool
 ├── bankapi/                  Phase 2 — Spring Boot REST API
 │   ├── src/main/java/com/bank/
-│   │   ├── model/            Customer — plain data, JSON and BSON mapping
+│   │   ├── model/            Customer, Account, Role, AccountType — plain data
 │   │   ├── repository/       storage access, the only package that knows about MongoDB
 │   │   ├── service/          business rules
-│   │   ├── controller/       HTTP translation only
+│   │   ├── controller/       HTTP translation, plus the narrow per-operation
+│   │   │                     request records the handlers bind
 │   │   └── config/           WebConfig — CORS
 │   ├── postman/              importable API collection with assertions
 │   ├── Dockerfile            multi-stage, layered jar, non-root
 │   └── mvnw / mvnw.cmd       Maven wrapper
-└── bankui/                   Phase 8 — React front end
-    ├── src/services/         api.js — the only code that knows the API is HTTP
-    ├── src/components/       pieces — Navbar, CustomerList, CustomerRow, AddCustomerForm
-    ├── src/pages/            route destinations — Home, Customers, EditCustomer,
-    │                         About, Contact, Login, NotFound
-    ├── Dockerfile            multi-stage, node builds → nginx serves
-    ├── nginx.conf            SPA fallback, cache rules, /api reverse proxy
-    └── vite.config.js        dev server + /api proxy
+├── bankui/                   Phase 8 — React front end
+│   ├── src/services/         api.js — the only code that knows the API is HTTP
+│   │                         viewer.js — the signed-in customer id, and nothing else
+│   ├── src/components/       pieces — Navbar, dashboards, account and customer lists,
+│   │                         forms, and the RequireSignIn / RequireAdmin route guards
+│   ├── src/pages/            route destinations — Home, Login, Register, Dashboard,
+│   │                         MyDashboard, EditCustomer, About, Contact, NotFound
+│   ├── Dockerfile            multi-stage, node builds → nginx serves
+│   ├── nginx.conf            SPA fallback, cache rules, /api reverse proxy
+│   ├── deploy.sh             build → two-pass S3 upload → CloudFront invalidation
+│   └── vite.config.js        dev server + /api proxy
+└── terraform/                Phases 11–12 — S3, CloudFront, OAC, EC2 API instance
 ```
 
 The three applications are independent — `javac`, Maven and npm — and no build interferes with another.
@@ -116,17 +160,43 @@ On first start against an empty collection, three customers are seeded. Seeding 
 
 Base URL: `http://localhost:8080/api/v1`
 
+**Customers.**
+
 | Method | Path | Success | Failure |
 |---|---|---|---|
-| `GET` | `/customers` | `200` + array | — |
+| `GET` | `/customers` | `200` + array — optional `?role=ADMIN\|CUSTOMER` filter | — |
 | `GET` | `/customers/{id}` | `200` + customer | `404` unknown id · `400` non-numeric id |
-| `POST` | `/customers` | `201` + `Location` header | `409` id already taken · `400` invalid body |
-| `PUT` | `/customers/{id}` | `200` + updated customer | `404` unknown id · `400` invalid body or id mismatch |
+| `POST` | `/customers` | `201` + `Location` header | `409` username taken · `400` invalid body |
+| `POST` | `/customers/signin` | `200` + customer | `401` no such user *or* wrong password · `400` invalid body |
+| `PUT` | `/customers/{id}` | `200` + updated customer | `404` unknown id · `409` username taken · `400` invalid body |
 | `DELETE` | `/customers/{id}` | `204` no content | `404` unknown id |
 
-`PUT` is a **full replacement**, and the body's `id` must match the path's. A mismatch is a `400` rather than a silent preference for one side — either half could be the typo, and guessing wrong overwrites the wrong record.
+**Accounts**, added later with the domain work rather than in Phase 2. Amounts are whole numbers, and account ids *are* chosen by the caller.
 
-Ids are assigned by hand, not generated. `409` rather than `400` on a duplicate is deliberate: the failure is state-dependent, since the same request would have succeeded before that id existed and will succeed again after it is deleted.
+**No request body in this API carries a balance.** An account opens at zero and money arrives through `deposit`, which is the guarded path. That is deliberate and is the fix for a real defect — see [Security](#security--what-is-and-is-not-enforced). The overdraft floor *is* the caller's, because how far below zero an account may go is a genuine choice made when it is opened; it is constrained to zero or negative, since a positive limit is a floor *above* zero and would make the account refuse ordinary withdrawals. A savings account is coerced to a zero floor whatever is sent.
+
+| Method | Path | Success | Failure |
+|---|---|---|---|
+| `GET` | `/accounts` | `200` + array | — |
+| `GET` | `/accounts/{id}` | `200` + account | `404` unknown id |
+| `POST` | `/accounts?customerId=` | `201` + `Location` header — body is `id`, `type`, optional `overdraftLimit` | `400` invalid body or missing `customerId` · `404` unknown customer · `409` account id taken |
+| `PUT` | `/accounts/{id}` | `200` + updated account — body is `type`, optional `overdraftLimit` | `400` invalid body · `404` unknown id |
+| `DELETE` | `/accounts/{id}` | `204` no content | `404` unknown id |
+| `GET` | `/customers/{customerId}/accounts` | `200` + array | `404` unknown customer |
+| `POST` | `/customers/{customerId}/accounts` | `201` + `Location` header — same body as `POST /accounts` | `400` invalid body · `404` unknown customer · `409` account id taken |
+| `DELETE` | `/customers/{customerId}/accounts/{accountId}` | `204` no content | `404` unknown customer, or that customer does not own that account |
+| `POST` | `/accounts/{id}/deposit?amount=` | `200` + the account as stored | `400` zero, negative or fractional amount · `404` unknown id · `409` the rules refused it |
+| `POST` | `/accounts/{id}/withdraw?amount=` | `200` + the account as stored | `400` zero, negative or fractional amount · `404` unknown id · `409` would breach the account's floor |
+
+**None of these endpoints requires a credential.** `signin` proves one and persists nothing — see [Security](#security--what-is-and-is-not-enforced) before reading the two tables as a description of a protected API.
+
+**Customer ids are assigned by the server, not by the caller.** The create body carries username, password and full name **and nothing else** — there is no field for an id or a role, so neither can be chosen, smuggled in, or accidentally required. That is structural rather than a check: nothing strips a role, because a role cannot arrive. The `409` is therefore a **username** collision, which is the only thing two creates can now collide on, and `409` rather than `400` is deliberate: the failure is state-dependent, since the same request would have succeeded before that username existed and will succeed again after it is released.
+
+`PUT /customers/{id}` is a **full replacement of the fields a client both reads and owns** — username and full name. It carries no id, so the path is the only identity and there is **no mismatch to check**; and it carries no role, so no route in this API can change one. That rule has four applications and no exceptions: `password` fails the *read* half (a client is never given it, so it cannot be required to send it back), while `id`, `role` and `accountIds` fail the *own* half.
+
+> **Why the request bodies are narrow records rather than the entity.** Binding the shared `Customer` for every operation produced three bugs at once, because model-level validation applies to *every* route that binds the model and so cannot be correct for all of them: `@NotNull role` broke every create from the UI; `password` marked both required and write-only made editing impossible — two individually reasonable annotations that were jointly unsatisfiable. **All three passed the unit suite**, because every existing test sent a complete body and none sent only the fields a client actually owns. A suite that exercises only full payloads cannot see a constraint that is impossible to satisfy partially. `CreateCustomerRequest`, `UpdateCustomerRequest` and `SignInRequest` each state exactly what one operation accepts, so no constraint has to serve two callers.
+>
+> **`Account` was still bound directly in three places, and it produced exactly the predicted failure** — the money-creation defect in the security section above. It now binds `CreateAccountRequest` and `UpdateAccountRequest` on all three. The rule that decides what belongs in one of these records has four applications and no exceptions: **a full replacement covers the fields a client both reads and owns.** `password` fails the read half. `id`, `role`, `accountIds` and `balance` fail the own half.
 
 Validation errors return the status and path but **do not name the offending field**, to avoid handing out free reconnaissance. `server.error.include-binding-errors` is left at its default of `never`.
 
@@ -165,19 +235,24 @@ npm run dev
 
 ### 2. What it does
 
-| Route | View |
-|---|---|
-| `/` | landing page — what the app does today, and what is coming |
-| `/customers` | customer table, plus the create form |
-| `/customers/{id}/edit` | edit one customer's username and full name |
-| `/about` | static placeholder |
-| `/contact` | static placeholder |
-| `/login` | placeholder — collects credentials and authenticates nobody |
-| anything else | the client-side 404 |
+| Route | Access | View |
+|---|---|---|
+| `/login` | public | sign-in form — posts to `/customers/signin` and, on a match, remembers the customer id |
+| `/register` | public | create an account — username, password, full name; the server assigns the id and the role |
+| `/` | signed in | landing page — what the app does today, and what is coming |
+| `/dashboard` | signed in | redirects to `/dashboard/{your id}` |
+| `/dashboard/{id}` | signed in | one customer's accounts, with deposit and withdraw |
+| `/customers/{id}/edit` | admin | edit one customer's username and full name |
+| `/about`, `/contact` | signed in | static placeholders |
+| anything else | signed in | the client-side 404 |
 
-Every endpoint in the API table above is reachable from the UI. The id field is editable when **creating** — ids are assigned by hand in this API — and is deliberately not editable when **editing**, because the path is the record's identity. Changing an id is not an edit; it is a delete plus a create, which the API already exposes separately.
+A signed-out visitor reaching anything outside the two public routes is redirected to `/login`, and the nav shows only **Sign in** and **Create an account** — a link that cannot be followed is worse than no link, because the redirect that follows reads as a bug rather than as a rule.
 
-`/login` renders a real form and submits nowhere. That is deliberate rather than unfinished: the tempting placeholder is to accept any credentials and set an `isLoggedIn` flag, which is not a weak login but *not a login at all* — the API would still serve every endpoint to anyone who asks, and the check would be a variable a user flips in DevTools. Authentication is a server decision, and it arrives in Phase 10.
+**There is no `/customers` route, and its absence is the fix rather than a tidy-up.** It was a standalone page listing every customer, with a create form and a delete button on every row, sitting behind a gate that asked whether somebody was signed in and never *who* — so any registered customer could type the address and get the administrative surface. The list now lives inside the admin dashboard and has no address of its own. **The surest gate on a URL is that nothing answers it**; removing the nav link was a consequence of removing the route, never a substitute for it.
+
+The **id is not editable anywhere.** On create, the server assigns it. On edit, the path is the record's identity — changing an id is not an edit, it is a delete plus a create, which the API already exposes separately.
+
+**None of this is a security control**, and the source says so at each gate. The sign-in state is a customer id in `sessionStorage` — never the password, never the role, because caching a role would make the client the holder of its own claim about what it may see. The API answers every one of these endpoints to any caller with no credential, so these gates stop a person browsing and stop nobody else. See [Security](#security--what-is-and-is-not-enforced).
 
 ### 3. How it is structured
 
@@ -301,9 +376,12 @@ Both runtime stages drop privileges (`spring`, uid 1001) and use an exec-form `E
 
 ```bash
 docker compose up -d --build     # → http://localhost:8081
+docker compose up -d --build api # after changing Java — see below
 docker compose down              # stop; data survives
 docker compose down -v           # ...and delete the database volume
 ```
+
+> **Rebuild the service you changed, and rebuild it before you debug.** `up -d` alone reuses the existing image, so a source change that is not rebuilt leaves the **old contract running against the new client** — which presents as a plain `400` and reads as a bug in code that is already correct. It cost a diagnosis here exactly once: the running image predated a request-body change, so the same call succeeded with a field the new front end had stopped sending. **Confirm by looking inside the artifact rather than at the source** — list the classes in the image and check that the type your change added is present. The source will agree with you; the container is what has to.
 
 Three services on a private network: `mongo` (no published port — nothing outside the network has business reaching it), `api` on `8080`, and `ui` on `8081`. Compose gives each a DNS entry under its service name, which is what makes `mongodb://mongo:27017` and `proxy_pass http://api:8080` resolve.
 
@@ -331,9 +409,40 @@ Recorded so the gaps are on the record rather than implied by silence:
 
 ---
 
+## Phase 11 — cloud (in progress)
+
+Both halves are deployed and **they are not yet connected.** All of the infrastructure is Terraform (`terraform/` — `main.tf`, `api.tf`, `variables.tf`, `outputs.tf`), written that way from the start rather than clicked together in the console and codified afterwards, which front-runs Phase 12.
+
+| Half | Where | State |
+|---|---|---|
+| `bankui/dist` | S3 + CloudFront | Live, but serving a **stale build** — see below |
+| `bankapi` | EC2 `t3.micro`, AL2023, backed by Atlas | Running; reachable from the distribution's prefix list only |
+
+**The S3 bucket is private and verified sealed** — the REST endpoint returns `403`, the website endpoint `404`, and only CloudFront can read it through an Origin Access Control. That matters beyond tidiness: **a public bucket is a second front door**, and anything reaching the objects directly bypasses every cache rule, response header, access log and future WAF rule. A control that can be walked around is not a control, and the bypass does not appear in the distribution's own metrics. The API's security group applies the same reasoning, accepting traffic from the CloudFront managed prefix list rather than from the internet.
+
+**The SPA fallback is a `403 → 200 → /index.html` error mapping, and the status code is the trap.** A private bucket does **not** answer `404` for a missing key — telling a caller whether an object exists is information S3 will not give someone with no read permission, so absence and denial are deliberately indistinguishable and both arrive as `403`. Most tutorials map `404`, which against this configuration silently does nothing, and the deep link then fails in a way that looks like a routing bug.
+
+### Two things are outstanding, and they stack
+
+1. **The `/api` CloudFront behaviour is written but not applied.** `main.tf` contains the `ordered_cache_behavior` for `/api/*`; the live distribution does not. So `/api/v1/customers` returns `200` with `text/html` — the SPA fallback catching the path — and the browser tries to parse HTML as JSON. **Note that the symptom is a `200`**: checking the API by status code alone reports success for every path under `/api`. The content type and the byte count are what discriminate.
+2. **The deployed bundle predates the sign-in and dashboard work.** The live asset is byte-for-byte the build from before that rework, so the deployed nav still reads Home / Customers / About / Contact / Log in and the `/customers` page still exists there. **Nothing observed on the live site is evidence about the current code.**
+
+Fix (1) before (2). A fresh bundle over an unapplied behaviour gives a site that *looks* current and still cannot reach its API — the sign-in form would render and then fail on submit, and that failure reads as bad credentials rather than as a missing origin.
+
+Two known operational hazards, recorded rather than discovered later:
+
+- **No Elastic IP was available, so the instance's public DNS is not stable across a stop/start.** A restart moves the address the distribution points at. The symptom (API unreachable) looks nothing like the cause (the origin moved).
+- **`minimum_protocol_version` is pinned to `TLSv1`**, a consequence of using the default CloudFront certificate. It cannot be raised without a custom ACM certificate in `us-east-1` — a property of the certificate, not a setting somebody forgot to tighten.
+
+The live URL is deliberately not printed in this file. The endpoints it fronts have no authorisation, and publishing a document that describes that gap alongside the address it applies to would be handing over both halves at once.
+
+---
+
 ## Testing
 
-Import `bankapi/postman/bankapi.postman_collection.json` into Postman and use **Run collection** — 18 requests, 27 assertions, covering the happy path plus every error status above.
+Import `bankapi/postman/bankapi.postman_collection.json` into Postman and use **Run collection** — 18 requests, 27 assertions.
+
+> **The collection is behind the API and is not a coverage claim.** It contains **no request against any `/accounts` endpoint and none against `/customers/signin`** — the entire account surface, including deposit and withdraw, is untested by it. It also predates the change that moved customer id assignment to the server, so its create-path assertions describe the older contract. Read it as the Phase 2–5 customer-CRUD suite it was written as, not as a check on the tables above.
 
 The same file runs headless, which is how it will be wired into CI:
 
@@ -355,9 +464,9 @@ bankui (React)  →  controller → service → repository → MongoDB Atlas
 
 Each layer talks only to the one below it. The controller never touches the repository, and the repository never formats a response.
 
-The front end sits outside that chain entirely. Everything it knows about the server is five URLs and their status codes — the contract published at `/v3/api-docs`. It has no build-time dependency on the API and no shared code with it, which is what makes them separately deployable in Phase 9.
+The front end sits outside that chain entirely. Everything it knows about the server is a list of URLs and their status codes — the contract published at `/v3/api-docs`. It has no build-time dependency on the API and no shared code with it, which is what makes them separately deployable in Phase 9.
 
-Those five URLs live in exactly one file, `bankui/src/services/api.js`. That is the front-end mirror of the same rule the repository package follows on the server: one layer knows how the thing behind it is reached, and everything above it is written in the application's own vocabulary. It is also what makes the contract auditable — the complete set of requests this UI can make is a nine-line block at the bottom of that file, so a gap like the missing filter/search shows up as an absence you can see.
+Those URLs live in exactly one file, `bankui/src/services/api.js`. That is the front-end mirror of the same rule the repository package follows on the server: one layer knows how the thing behind it is reached, and everything above it is written in the application's own vocabulary. It is also what makes the contract auditable — the complete set of requests this UI can make is a short block of one-line exports, so a gap like the missing filter/search shows up as an absence you can see.
 
 `CustomerRepository` **wraps** a Spring Data `MongoRepository` rather than being replaced by one. That costs an extra class of mostly delegation, and buys two things: the service keeps speaking the application's vocabulary instead of Spring Data's, and `MongoRepository`'s two dozen other methods — `deleteAll()` among them — stay out of reach of business logic.
 
@@ -375,11 +484,16 @@ Responsibilities are split so that each check lives in the only layer that can m
 Feature branches over a chain of long-lived stage branches, each cut from the tip of the previous one:
 
 ```
-api-backend  ──►  database  ──►  frontend  ──►  deployed
-   (ph 2)        (ph 4.5, 3–5)      (ph 8)     (ph 9, 11–12)
+stage:    api-backend  ──►   database     ──►  frontend  ──►   deployed
+branch:   rest_api     ──►   db_with_api  ──►  react     ──►   CI_CD
+phases:     (ph 2)         (ph 4.5, 3–5)        (ph 8)       (ph 9, 11–12)
 ```
 
-`api-backend` ends where the API works against a hardcoded in-memory repository — that stub is what proves the layering. `database` is where storage becomes real (MongoDB Atlas) and gets proven, which is why the testing and documentation phases live there rather than with the API. `frontend` adds `bankui/` without changing a line of Java.
+**The top row is stage *descriptions*; the middle row is the branch names that actually exist.** Earlier versions of this file printed only the stage names and wrote about them as though they were branches — they never were. `git branch` shows `rest_api`, `db_with_api`, `react` and `CI_CD`, plus `main` and `console-app`. The mapping is spelled out rather than corrected quietly, because anyone who read the earlier wording and went looking for a `database` branch found nothing and had to work out why.
+
+`rest_api` ends where the API works against a hardcoded in-memory repository — that stub is what proves the layering. `db_with_api` is where storage becomes real (MongoDB Atlas) and gets proven, which is why the testing and documentation phases live there rather than with the API. `react` adds `bankui/` without changing a line of Java.
+
+One branch sits outside the chain: **`app_branch`** carries the `Account` vertical and the customer/roles/sign-in rework. It is domain work rather than a competency level, so the stage model has no slot for it. It is **unmerged** — noted as an exception rather than absorbed into a chain it does not belong to.
 
 `main` tracks the newest **completed** stage, so it always runs. Active work never happens on it directly. Fixes merge **forward only** — a change made on an earlier stage branch is merged into the later one, never cherry-picked backward.
 

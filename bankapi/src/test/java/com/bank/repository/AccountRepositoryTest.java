@@ -105,32 +105,57 @@ class AccountRepositoryTest
     void editAccount_returnsEmptyAndSavesNothing_whenTheIdIsAbsent()
     {
         AccountRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.existsById(999)).thenReturn(false);
+        when(mongo.findById(999)).thenReturn(Optional.empty());
 
-        assertThat(repository.editAccount(999, new Account(999, AccountType.SAVINGS, 0.0, 0.0))).isEmpty();
+        assertThat(repository.editAccount(999, AccountType.SAVINGS, 0.0)).isEmpty();
 
         verify(mongo, never()).save(any(Account.class));
     }
 
-    // same invariant the customer repository holds: the stored document is keyed by the PATH
-    // id, never by whatever the client put in the body.
+    /*
+     * THE TEST THAT WOULD HAVE CAUGHT THE SECOND HALF OF THE MONEY-CREATION BUG, and it did
+     * not exist because every replace test sent a complete body and asserted that the
+     * complete body was what got stored - including its balance. That reads as correct right
+     * up until you ask where the balance came from.
+     *
+     * The replacement is keyed by the PATH id and carries the STORED balance. Neither can be
+     * stated by a caller any more, so PUT can rename an account's type or move its floor and
+     * cannot touch the money. Withdraw and deposit are the only things that can.
+     */
     @Test
-    void editAccount_keysTheReplacementByThePathId_ignoringTheBodyId()
+    void editAccount_carriesTheStoredBalanceAcross_soAReplaceCannotMoveMoney()
     {
         AccountRepository repository = repositoryWithPopulatedCollection();
-        when(mongo.existsById(102)).thenReturn(true);
+        when(mongo.findById(102)).thenReturn(Optional.of(new Account(102, AccountType.CHECKING, 250.0, -100.0)));
         when(mongo.save(any(Account.class))).thenAnswer(call -> call.getArgument(0));
 
-        // body claims id 999 on purpose. the repository must not believe it.
-        repository.editAccount(102, new Account(999, AccountType.CHECKING, 250.0, -100.0));
+        repository.editAccount(102, AccountType.CHECKING, -500.0);
 
         ArgumentCaptor<Account> saved = ArgumentCaptor.forClass(Account.class);
         verify(mongo).save(saved.capture());
 
         assertThat(saved.getValue().getId()).isEqualTo(102);
         assertThat(saved.getValue().getType()).isEqualTo(AccountType.CHECKING);
-        assertThat(saved.getValue().getBalance()).isEqualTo(250.0);
-        assertThat(saved.getValue().getOverdraftLimit()).isEqualTo(-100.0);
+        assertThat(saved.getValue().getBalance()).isEqualTo(250.0);   // unchanged by the edit
+        assertThat(saved.getValue().getOverdraftLimit()).isEqualTo(-500.0);
+    }
+
+    // the constructor's savings coercion still runs on the way through, so a replace cannot
+    // give a savings account an overdraft even when the request asks for one.
+    @Test
+    void editAccount_forcesASavingsFloorToZero()
+    {
+        AccountRepository repository = repositoryWithPopulatedCollection();
+        when(mongo.findById(101)).thenReturn(Optional.of(new Account(101, AccountType.SAVINGS, 500.0, 0.0)));
+        when(mongo.save(any(Account.class))).thenAnswer(call -> call.getArgument(0));
+
+        repository.editAccount(101, AccountType.SAVINGS, -100.0);
+
+        ArgumentCaptor<Account> saved = ArgumentCaptor.forClass(Account.class);
+        verify(mongo).save(saved.capture());
+
+        assertThat(saved.getValue().getOverdraftLimit()).isZero();
+        assertThat(saved.getValue().getBalance()).isEqualTo(500.0);
     }
 
     @Test

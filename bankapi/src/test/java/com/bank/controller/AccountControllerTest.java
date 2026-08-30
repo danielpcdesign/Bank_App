@@ -8,10 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -52,8 +50,14 @@ class AccountControllerTest
         return new Account(id, AccountType.SAVINGS, balance, 0.0);
     }
 
-    private static final String SAVINGS_BODY =
-        "{\"id\":104,\"type\":\"SAVINGS\",\"balance\":0.0,\"overdraftLimit\":0.0}";
+    // NOTE WHAT IS NOT IN EITHER OF THESE: a balance. CreateAccountRequest and
+    // UpdateAccountRequest have no field for one, and that is the fix these tests guard.
+    // The replace body carries no id either - the path is the only identity.
+    private static final String CREATE_BODY =
+        "{\"id\":104,\"type\":\"SAVINGS\",\"overdraftLimit\":0.0}";
+
+    private static final String REPLACE_BODY =
+        "{\"type\":\"SAVINGS\",\"overdraftLimit\":0.0}";
 
     @Test
     void getAllAccounts_returnsTheListFromTheService() throws Exception
@@ -89,19 +93,21 @@ class AccountControllerTest
                 .andExpect(status().isNotFound());
     }
 
-    // any(Account.class) is required, not lazy: jackson builds its own instance and Account
-    // does not override equals(), so a literal argument could never match.
+    // the stub takes four plain values now rather than any(Account.class). that is not a
+    // style change: the service is no longer handed a client-built object, so there is
+    // nothing whose identity jackson could break - and the arguments become assertable.
     // the unscoped create delegates to the customer-scoped one, so it goes through exactly
     // the same guards - which is what these stubs assert.
     @Test
     void addAccount_returns201WithALocationHeader_whenTheOwnerExistsAndTheIdIsFree() throws Exception
     {
         when(customerService.getCustomerById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith")));
-        when(accountService.openAccountForCustomer(eq(1), any(Account.class))).thenReturn(true);
+        when(accountService.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0))
+            .thenReturn(Optional.of(savings(104, 0.0)));
 
         mockMvc.perform(post("/api/v1/accounts").param("customerId", "1")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/api/v1/accounts/104"));
     }
@@ -113,7 +119,7 @@ class AccountControllerTest
     {
         mockMvc.perform(post("/api/v1/accounts")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(accountService);
@@ -126,7 +132,7 @@ class AccountControllerTest
 
         mockMvc.perform(post("/api/v1/accounts").param("customerId", "99")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isNotFound());
 
         verifyNoInteractions(accountService);
@@ -139,7 +145,7 @@ class AccountControllerTest
     {
         mockMvc.perform(post("/api/v1/accounts").param("customerId", "1")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":104,\"balance\":0.0,\"overdraftLimit\":0.0}"))
+                    .content("{\"id\":104,\"overdraftLimit\":0.0}"))
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(accountService);
@@ -149,44 +155,38 @@ class AccountControllerTest
     void addAccount_returns409_whenTheAccountIdIsAlreadyTaken() throws Exception
     {
         when(customerService.getCustomerById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith")));
-        when(accountService.openAccountForCustomer(eq(1), any(Account.class))).thenReturn(false);
+        when(accountService.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0)).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/v1/accounts").param("customerId", "1")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isConflict());
     }
 
-    @Test
-    void editAccount_returns400AndNeverCallsTheService_whenBodyIdDiffersFromPathId() throws Exception
-    {
-        mockMvc.perform(put("/api/v1/accounts/102")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
-                .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(accountService);
-    }
+    // the id-mismatch test that used to sit here is DELETED, and deliberately not replaced
+    // with an equivalent. UpdateAccountRequest has no id component, so a body id cannot
+    // disagree with the path - the case is unrepresentable rather than merely untested.
+    // What replaces it is editAccount_ignoresAnIdOrBalanceSmuggledIntoTheBody below.
 
     @Test
     void editAccount_returns404_whenTheServiceReturnsEmpty() throws Exception
     {
-        when(accountService.editAccount(eq(104), any(Account.class))).thenReturn(Optional.empty());
+        when(accountService.editAccount(104, AccountType.SAVINGS, 0.0)).thenReturn(Optional.empty());
 
         mockMvc.perform(put("/api/v1/accounts/104")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(REPLACE_BODY))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void editAccount_returns200AndTheUpdatedAccount_whenTheServiceReturnsIt() throws Exception
     {
-        when(accountService.editAccount(eq(104), any(Account.class))).thenReturn(Optional.of(savings(104, 25.0)));
+        when(accountService.editAccount(104, AccountType.SAVINGS, 0.0)).thenReturn(Optional.of(savings(104, 25.0)));
 
         mockMvc.perform(put("/api/v1/accounts/104")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(REPLACE_BODY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.balance").value(25.0));
     }
@@ -246,11 +246,12 @@ class AccountControllerTest
     void openAccountForCustomer_returns201WithALocationHeader() throws Exception
     {
         when(customerService.getCustomerById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith")));
-        when(accountService.openAccountForCustomer(eq(1), any(Account.class))).thenReturn(true);
+        when(accountService.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0))
+            .thenReturn(Optional.of(savings(104, 0.0)));
 
         mockMvc.perform(post("/api/v1/customers/1/accounts")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/api/v1/accounts/104"));
     }
@@ -264,7 +265,7 @@ class AccountControllerTest
 
         mockMvc.perform(post("/api/v1/customers/99/accounts")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isNotFound());
 
         verifyNoInteractions(accountService);
@@ -274,12 +275,108 @@ class AccountControllerTest
     void openAccountForCustomer_returns409_whenTheAccountIdIsTaken() throws Exception
     {
         when(customerService.getCustomerById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith")));
-        when(accountService.openAccountForCustomer(eq(1), any(Account.class))).thenReturn(false);
+        when(accountService.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0)).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/v1/customers/1/accounts")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(SAVINGS_BODY))
+                    .content(CREATE_BODY))
                 .andExpect(status().isConflict());
+    }
+
+    //-------------------------------------------------THE MONEY-CREATION DEFECT-------------------------------------------------
+
+    /*
+     * THE TESTS THAT WOULD HAVE CAUGHT IT, and none of them existed.
+     *
+     * Every account test in this class sent a complete, well-formed body with a whole
+     * balance, so none could notice that the balance was a field a client got to CHOOSE.
+     * The live request was:
+     *
+     *     POST /api/v1/accounts?customerId=3
+     *     {"id":999,"type":"CHECKING","balance":100.55,"overdraftLimit":50}   ->  201
+     *
+     * That is the same shape as the lesson already recorded for the customer bugs: a suite
+     * of complete payloads cannot see a field that should never have been in the payload at
+     * all. The fix is structural, so these assert the STRUCTURE - that a balance sent by a
+     * client reaches nothing, and that a positive floor is refused outright.
+     */
+
+    // the exact reported body. it must no longer be able to state an opening balance, and
+    // the verify is the assertion that matters: the service is told 0.0 whatever was sent.
+    @Test
+    void openAccountForCustomer_opensAtZero_whenTheBodyTriesToStateABalance() throws Exception
+    {
+        when(customerService.getCustomerById(3)).thenReturn(Optional.of(new Customer(3, "carol", "Carol Johnson")));
+        when(accountService.openAccountForCustomer(3, 999, AccountType.CHECKING, 0.0))
+            .thenReturn(Optional.of(new Account(999, AccountType.CHECKING, 0.0, 0.0)));
+
+        mockMvc.perform(post("/api/v1/customers/3/accounts")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":999,\"type\":\"CHECKING\",\"balance\":100.55}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.balance").value(0.0));
+
+        // the record has no balance component, so the smuggled figure binds to nothing
+        verify(accountService).openAccountForCustomer(3, 999, AccountType.CHECKING, 0.0);
+    }
+
+    // the other half of the same reported request. a limit is a FLOOR, so a positive one
+    // sits above zero and would refuse ordinary withdrawals.
+    @Test
+    void openAccountForCustomer_returns400AndNeverCallsTheService_whenTheOverdraftLimitIsPositive() throws Exception
+    {
+        mockMvc.perform(post("/api/v1/customers/3/accounts")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":999,\"type\":\"CHECKING\",\"overdraftLimit\":50}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(accountService);
+    }
+
+    // an omitted floor is zero rather than null - the boxed Double is what lets validation
+    // tell "absent" from "0", and floor() is what stops the service ever seeing a null.
+    @Test
+    void openAccountForCustomer_treatsAnOmittedOverdraftLimitAsZero() throws Exception
+    {
+        when(customerService.getCustomerById(1)).thenReturn(Optional.of(new Customer(1, "alice", "Alice Smith")));
+        when(accountService.openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0))
+            .thenReturn(Optional.of(savings(104, 0.0)));
+
+        mockMvc.perform(post("/api/v1/customers/1/accounts")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":104,\"type\":\"SAVINGS\"}"))
+                .andExpect(status().isCreated());
+
+        verify(accountService).openAccountForCustomer(1, 104, AccountType.SAVINGS, 0.0);
+    }
+
+    // PUT was the SECOND money-creation route, and closing only the create one would have
+    // fixed half the bug. neither a balance nor an id can bind to UpdateAccountRequest.
+    @Test
+    void editAccount_ignoresAnIdOrBalanceSmuggledIntoTheBody() throws Exception
+    {
+        when(accountService.editAccount(101, AccountType.SAVINGS, 0.0))
+            .thenReturn(Optional.of(savings(101, 500.0)));
+
+        mockMvc.perform(put("/api/v1/accounts/101")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":999,\"type\":\"SAVINGS\",\"balance\":1000000,\"overdraftLimit\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(500.0));
+
+        // keyed by the PATH id, and told nothing about a balance
+        verify(accountService).editAccount(101, AccountType.SAVINGS, 0.0);
+    }
+
+    @Test
+    void editAccount_returns400AndNeverCallsTheService_whenTheOverdraftLimitIsPositive() throws Exception
+    {
+        mockMvc.perform(put("/api/v1/accounts/101")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"type\":\"CHECKING\",\"overdraftLimit\":50}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(accountService);
     }
 
     @Test

@@ -295,4 +295,65 @@ class CustomerServiceTest
 
         assertThat(service.editCustomer(99, "ghost", "Ghost User")).isEmpty();
     }
+
+    //---------------------------------------------USERNAME UNIQUENESS ON RENAME---------------------------------------------
+
+    /*
+     * THE TESTS THAT WOULD HAVE CAUGHT IT, and none of them existed.
+     *
+     * The uniqueness rule has been enforced on CREATE since it was written, and tested twice
+     * in the section above. editCustomer was a pure pass-through - and a pass-through cannot
+     * fail a rule nobody asked it to apply. Every edit test here checked that two strings
+     * reached the repository, which they always did. The rule was simply never asked for on
+     * the second route that could break it.
+     *
+     * The live sequence: PUT a second customer onto "carol", and GET /customers returns two
+     * of them. findByUsername is a single Optional, so it THROWS on two matches and sign-in
+     * answers 500 - for the ORIGINAL carol as much as the impostor. Any anonymous caller
+     * could lock a real user out permanently, without touching that user's record at all.
+     *
+     * No identity is needed to refuse it, which is why this is fixed now rather than deferred
+     * to phase 10: "two customers must not share a username" is a fact about the state of the
+     * system, the same category as the last-admin invariant above.
+     */
+    @Test
+    void editCustomer_refusesAUsernameHeldByAnotherCustomer()
+    {
+        when(repository.findByUsername("carol")).thenReturn(Optional.of(
+            new Customer(3, "carol", "Carol Johnson", List.of(103), Role.CUSTOMER, "carol123")));
+
+        assertThat(service.editCustomer(6, "carol", "Heidi L III")).isEmpty();
+
+        verify(repository, never()).editCustomer(anyInt(), any(), any());
+    }
+
+    /*
+     * THE OTHER HALF, and the reason the check asks "held by ANOTHER" rather than "held".
+     *
+     * A customer keeping its own username while changing its full name must still succeed. A
+     * plain findByUsername(...).isPresent() would refuse that - every PUT which did not also
+     * rename would 409, and most of them do not. The id is what tells "this record" apart
+     * from "a different record", and CREATE never needs that distinction because a record
+     * that does not exist yet cannot be the one already holding the name.
+     */
+    @Test
+    void editCustomer_allowsACustomerToKeepItsOwnUsername()
+    {
+        Customer renamed = new Customer(3, "carol", "Carol J. Johnson", List.of(103), Role.CUSTOMER, "carol123");
+        when(repository.findByUsername("carol")).thenReturn(Optional.of(
+            new Customer(3, "carol", "Carol Johnson", List.of(103), Role.CUSTOMER, "carol123")));
+        when(repository.editCustomer(3, "carol", "Carol J. Johnson")).thenReturn(Optional.of(renamed));
+
+        assertThat(service.editCustomer(3, "carol", "Carol J. Johnson")).contains(renamed);
+    }
+
+    @Test
+    void editCustomer_allowsARenameToAFreeUsername()
+    {
+        Customer renamed = new Customer(2, "bobby", "Bob Jones", List.of(102), Role.CUSTOMER, "bob123");
+        when(repository.findByUsername("bobby")).thenReturn(Optional.empty());
+        when(repository.editCustomer(2, "bobby", "Bob Jones")).thenReturn(Optional.of(renamed));
+
+        assertThat(service.editCustomer(2, "bobby", "Bob Jones")).contains(renamed);
+    }
 }

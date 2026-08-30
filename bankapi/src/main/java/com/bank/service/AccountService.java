@@ -2,12 +2,12 @@ package com.bank.service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 
 import com.bank.model.Account;
+import com.bank.model.AccountType;
 import com.bank.model.Customer;
 import com.bank.repository.AccountRepository;
 import com.bank.repository.CustomerRepository;
@@ -41,22 +41,24 @@ public class AccountService
         return accountRepository.findById(id);
     }
 
-    // unique _id. an empty Optional back means the insert was rejected as a duplicate
-    public boolean addNewAccount(Account account)
+    /*
+     * Replaces the two fields a client owns. It cannot do anything else, because
+     * UpdateAccountRequest cannot express anything else.
+     *
+     * THE ID MISMATCH CHECK IS GONE, and it is unreachable rather than removed on a whim -
+     * the same thing that happened to editCustomer when it stopped binding a whole Customer.
+     * The request carries no id to disagree with the path, so there is no mismatch to reject
+     * and no 400 left for the controller to return.
+     *
+     * A METHOD THAT TOOK A WHOLE Account IS ALSO GONE, and that one was load-bearing: it
+     * handed the repository a client-built object whose balance went straight to storage.
+     * Taking two named fields instead is what makes writing a balance IMPOSSIBLE here rather
+     * than merely something this method happens not to do.
+     */
+    public Optional<Account> editAccount(int id, AccountType type, double overdraftLimit)
     {
-        return accountRepository.addAccount(account).isPresent();
-    }
-
-    public Optional<Account> editAccount(int id, Account data)
-    {
-        // Objects.equals, not !=, so a null body id is a mismatch rather than an NPE.
-        if (!Objects.equals(data.getId(), id))
-        {
-            return Optional.empty(); // id mismatch
-        }
-
         // existence checked at repo level
-        return accountRepository.editAccount(id, data);
+        return accountRepository.editAccount(id, type, overdraftLimit);
     }
 
     // deleting an account also drops it from whichever customer listed it. leaving the id
@@ -93,24 +95,39 @@ public class AccountService
         return Optional.of(accounts);
     }
 
-    // false means the id was already taken. the controller has already established that the
-    // customer exists, so the guard here is belt and braces rather than the reported case -
-    // but the service cannot assume it was called through that controller.
-    public boolean openAccountForCustomer(int customerId, Account account)
+    /*
+     * THE ACCOUNT IS BUILT HERE, not bound from a request, and that is the fix for the
+     * money-creation defect. The caller names an id, a type and a floor; the balance is not
+     * a parameter, so there is no value a caller could send that this method would write.
+     *
+     * Mirrors CustomerService.addNewCustomer exactly - the controller passes the fields the
+     * request record carries and the service constructs the document. The server owning the
+     * fields the client does not is the same shape in both, which is why an id and a role
+     * cannot be smuggled into a customer either.
+     *
+     * An empty Optional means the id was already taken, OR that there is no such customer.
+     * The controller establishes the customer first so its 404 and this 409 stay distinct;
+     * the guard below is belt and braces, because the service cannot assume it was called
+     * through that controller.
+     */
+    public Optional<Account> openAccountForCustomer(int customerId, Integer accountId, AccountType type, double overdraftLimit)
     {
         Optional<Customer> customer = customerRepository.findById(customerId);
         if (customer.isEmpty())
         {
-            return false;
+            return Optional.empty();
         }
 
-        if (!addNewAccount(account))
+        // OPENS AT ZERO. money enters through deposit, which is where the positive and
+        // whole-amount rules live - an opening balance would be a way round both.
+        Optional<Account> created = accountRepository.addAccount(new Account(accountId, type, 0.0, overdraftLimit));
+        if (created.isEmpty())
         {
-            return false;
+            return Optional.empty();
         }
 
-        link(customer.get(), account.getId());
-        return true;
+        link(customer.get(), accountId);
+        return created;
     }
 
     // false means this customer does not own that account - either the customer is absent,

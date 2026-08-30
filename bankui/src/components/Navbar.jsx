@@ -81,7 +81,11 @@ export default function Navbar() {
       <NavLink to="/contact" className={linkClass}>Contact</NavLink>
 
       {/* Pushed to the far side by the stylesheet rather than by markup order, because it is
-          a visual grouping, not a structural one.
+          a visual grouping, not a structural one. `nav-end` says that role - "this sits at the
+          end of the bar" - and it replaces an id of `nav-login`, which was both wrong (this
+          button signs OUT) and the wrong kind of hook: an id is an identity, one per page, for
+          labels and fragment links and scripts, and it outranks classes in the cascade for no
+          reason a layout rule needs.
 
           A BUTTON for signing out, where signing in is a LINK, and the difference is not
           cosmetic.
@@ -89,7 +93,7 @@ export default function Navbar() {
           by a screen reader as somewhere to go. Signing out is none of those - it is an
           action with an effect, and a thing that CHANGES something should not be a URL that
           could be prefetched or opened in a background tab. */}
-      <button type="button" id="nav-login" onClick={handleSignOut} className="link-button">
+      <button type="button" onClick={handleSignOut} className="link-button nav-end">
         Sign out
       </button>
     </nav>

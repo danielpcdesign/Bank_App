@@ -380,6 +380,9 @@ class CustomerControllerTest
     @Test
     void editCustomer_returns200AndAppliesTheChange_whenTheBodyCarriesOnlyTheOwnedFields() throws Exception
     {
+        // existence is established by the controller first now, so that the service's empty
+        // Optional can mean one thing only: refused because the username is taken.
+        when(service.getCustomerById(5)).thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
         when(service.editCustomer(5, "nina2", "Nina C. Cortez"))
             .thenReturn(Optional.of(new Customer(5, "nina2", "Nina C. Cortez", List.of(), Role.CUSTOMER, "pw")));
 
@@ -397,6 +400,7 @@ class CustomerControllerTest
     @Test
     void editCustomer_ignoresARoleIdPasswordOrAccountIdsSmuggledIntoTheBody() throws Exception
     {
+        when(service.getCustomerById(5)).thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez")));
         when(service.editCustomer(5, "nina", "Nina Cortez"))
             .thenReturn(Optional.of(new Customer(5, "nina", "Nina Cortez", List.of(), Role.CUSTOMER, "pw")));
 
@@ -410,15 +414,43 @@ class CustomerControllerTest
         verify(service).editCustomer(5, "nina", "Nina Cortez");
     }
 
+    // 404 is now decided BEFORE the edit is attempted, on the customer's existence, so an
+    // absent record never reaches the service at all.
     @Test
-    void editCustomer_returns404_whenNoCustomerHasThatId() throws Exception
+    void editCustomer_returns404AndNeverEdits_whenNoCustomerHasThatId() throws Exception
     {
-        when(service.editCustomer(99, "ghost", "Ghost User")).thenReturn(Optional.empty());
+        when(service.getCustomerById(99)).thenReturn(Optional.empty());
 
         mockMvc.perform(put("/api/v1/customers/99")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"username\":\"ghost\",\"fullName\":\"Ghost User\"}"))
                 .andExpect(status().isNotFound());
+
+        verify(service, never()).editCustomer(anyInt(), any(), any());
+    }
+
+    /*
+     * THE RENAME CONFLICT, and the reason the two statuses had to be separated.
+     *
+     * The service reports "that username belongs to someone else" the same way it reports
+     * every refusal - an empty Optional - so the controller cannot tell it apart from "no
+     * such customer" by the return value alone. It establishes existence first, exactly as
+     * DELETE, deposit and withdraw already did, and the empty Optional then means one thing.
+     *
+     * 409 rather than 400 for the same reason POST uses it: the request is well formed, and
+     * the same request succeeds once the other customer gives the name up. It is a conflict
+     * with the state of the system, not a malformed body.
+     */
+    @Test
+    void editCustomer_returns409_whenAnotherCustomerAlreadyHoldsTheUsername() throws Exception
+    {
+        when(service.getCustomerById(6)).thenReturn(Optional.of(new Customer(6, "heidi", "Heidi L")));
+        when(service.editCustomer(6, "carol", "Heidi L III")).thenReturn(Optional.empty());
+
+        mockMvc.perform(put("/api/v1/customers/6")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"username\":\"carol\",\"fullName\":\"Heidi L III\"}"))
+                .andExpect(status().isConflict());
     }
 
     @Test

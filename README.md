@@ -11,7 +11,7 @@ The repository deliberately keeps every phase's code rather than replacing it, s
 | 1 | Console app — OOD, collections, SOLID | Complete |
 | 2 | REST API — Spring Boot, layered architecture, MongoDB Atlas | Complete |
 | 3 | TDD — JUnit + Mockito at all three layers | Complete — 27 tests, no network |
-| 4 | API testing — Postman collection | Complete — 18 requests, 27 assertions |
+| 4 | API testing — Postman collection | Complete — 85 requests, 168 assertions |
 | 5 | API docs — Swagger / OpenAPI | Complete |
 | 8 | React front end — Vite, react-router | Complete — full CRUD against the API |
 | 9 | DevOps — CORS, GitHub Actions CI, Docker, Compose | Complete — Kubernetes deferred |
@@ -403,7 +403,7 @@ A local MongoDB rather than Atlas, so the stack is self-contained: no credential
 
 Recorded so the gaps are on the record rather than implied by silence:
 
-- **newman in CI.** It needs a running API and a live database — a service container and a start-wait-run-stop sequence. That is integration testing, a different shape from the two build jobs, and it waits on the compose stack it can now reuse.
+- **newman in CI.** It needs a running API and a live database — a service container and a start-wait-run-stop sequence. That is integration testing, a different shape from the two build jobs, and it waits on the compose stack it can now reuse. **No longer blocked**: the stack exists and the collection is worth running. Note the near-miss in the ordering, though — had this been wired up while it was "just waiting on a stack", CI would have been running the *old* collection, and every push would have renamed the administrator.
 - **Any deploy step.** This pipeline builds and verifies; it does not ship. CD comes after there is somewhere to ship to (Phase 11).
 - **Kubernetes.** Listed in the roadmap and absent from the course curriculum, which provisions S3 + CloudFront + API Gateway + Lambda and nothing else. Whether it becomes a standalone competency or stays conceptual is an open decision, not a silent omission.
 
@@ -416,7 +416,9 @@ Both halves are deployed and **they are not yet connected.** All of the infrastr
 | Half | Where | State |
 |---|---|---|
 | `bankui/dist` | S3 + CloudFront | Live, but serving a **stale build** — see below |
-| `bankapi` | EC2 `t3.micro`, AL2023, backed by Atlas | Running; reachable from the distribution's prefix list only |
+| `bankapi` | EC2 `t3.micro`, AL2023, backed by Atlas | Running the current build; reachable from the distribution's prefix list only |
+
+**The API is deployed as a container on EC2 rather than on ECS**, and the reason is an account restriction rather than a preference: `ecs:ListClusters` and `ecr:DescribeRepositories` both return `AccessDeniedException` for this training account. The decision that mattered — **always-on rather than scale-to-zero** — is unaffected, and it was made for the audience: this is a portfolio artifact that gets opened weeks after anyone last touched it, which is exactly when a scale-to-zero service is coldest, so the worst latency the system can produce would land on the first click of the person being impressed.
 
 **The S3 bucket is private and verified sealed** — the REST endpoint returns `403`, the website endpoint `404`, and only CloudFront can read it through an Origin Access Control. That matters beyond tidiness: **a public bucket is a second front door**, and anything reaching the objects directly bypasses every cache rule, response header, access log and future WAF rule. A control that can be walked around is not a control, and the bypass does not appear in the distribution's own metrics. The API's security group applies the same reasoning, accepting traffic from the CloudFront managed prefix list rather than from the internet.
 
@@ -427,12 +429,17 @@ Both halves are deployed and **they are not yet connected.** All of the infrastr
 1. **The `/api` CloudFront behaviour is written but not applied.** `main.tf` contains the `ordered_cache_behavior` for `/api/*`; the live distribution does not. So `/api/v1/customers` returns `200` with `text/html` — the SPA fallback catching the path — and the browser tries to parse HTML as JSON. **Note that the symptom is a `200`**: checking the API by status code alone reports success for every path under `/api`. The content type and the byte count are what discriminate.
 2. **The deployed bundle predates the sign-in and dashboard work.** The live asset is byte-for-byte the build from before that rework, so the deployed nav still reads Home / Customers / About / Contact / Log in and the `/customers` page still exists there. **Nothing observed on the live site is evidence about the current code.**
 
-Fix (1) before (2). A fresh bundle over an unapplied behaviour gives a site that *looks* current and still cannot reach its API — the sign-in form would render and then fail on submit, and that failure reads as bad credentials rather than as a missing origin.
+**The instance itself has already been updated** to the build carrying the security fixes above — it had been running a pre-fix image. Which build is live was confirmed by **reading the running app's own OpenAPI spec** rather than by sending requests: that instance talks to real data, and `/v3/api-docs` proves the contract without writing a record. Where an application publishes its own contract, that is the cheapest honest answer to *"which build is this?"*.
+
+> **The ordering rule, worth stating because getting it backwards would have been serious.** Applying the `/api` behaviour before updating the instance would have **published the old vulnerable build to the internet** — the money-creation primitive and the username lockout, both live and both reachable with no credential. Until that behaviour exists the API is unreachable from outside, since the security group admits only CloudFront's prefix list, so **an unfinished piece of infrastructure was the last thing keeping a vulnerable API private.** Nothing chose that. **When a change makes something reachable, sequence it after the thing being reached is correct** — reachability is not a neutral step, it is the step that turns every latent defect behind it into a live one.
+
+**Deploy the bundle in the same operation as the apply, not afterwards.** The API is now current and the bundle is not, so connecting them publishes an old client against a new contract — the same client/server mismatch that has already cost one diagnosis in this project, except this time in public and looking like the apply broke something.
 
 Two known operational hazards, recorded rather than discovered later:
 
 - **No Elastic IP was available, so the instance's public DNS is not stable across a stop/start.** A restart moves the address the distribution points at. The symptom (API unreachable) looks nothing like the cause (the origin moved).
 - **`minimum_protocol_version` is pinned to `TLSv1`**, a consequence of using the default CloudFront certificate. It cannot be raised without a custom ACM certificate in `us-east-1` — a property of the certificate, not a setting somebody forgot to tighten.
+- **Replacing the instance is destructive, despite the Terraform.** `user_data` deliberately never writes `/opt/bankapi/.env`, so a replacement destroys the credential file and leaves the service dead until somebody hand-writes it. Code updates are therefore applied in place. **A machine is only safely disposable when everything on it is reproducible from code**, and the one file deliberately kept out of code is what makes this one a pet.
 
 The live URL is deliberately not printed in this file. The endpoints it fronts have no authorisation, and publishing a document that describes that gap alongside the address it applies to would be handing over both halves at once.
 
@@ -440,17 +447,23 @@ The live URL is deliberately not printed in this file. The endpoints it fronts h
 
 ## Testing
 
-Import `bankapi/postman/bankapi.postman_collection.json` into Postman and use **Run collection** — 18 requests, 27 assertions.
-
-> **The collection is behind the API and is not a coverage claim.** It contains **no request against any `/accounts` endpoint and none against `/customers/signin`** — the entire account surface, including deposit and withdraw, is untested by it. It also predates the change that moved customer id assignment to the server, so its create-path assertions describe the older contract. Read it as the Phase 2–5 customer-CRUD suite it was written as, not as a check on the tables above.
-
-The same file runs headless, which is how it will be wired into CI:
+Import `bankapi/postman/bankapi.postman_collection.json` into Postman and use **Run collection** — **85 requests, 168 assertions**, covering both endpoint tables above including deposit, withdraw and sign-in. The same file runs headless:
 
 ```bash
 npx newman run bankapi/postman/bankapi.postman_collection.json
 ```
 
-The happy-path folder creates and then deletes a customer, so the collection is repeatable against a persistent database.
+Requests clean up after themselves, so the collection is repeatable against a persistent database.
+
+Three folders are **regression tests for defects that actually shipped**, and they assert the *impact* rather than the status code:
+
+- The smuggled opening balance asserts `201`, **and** `balance === 0`, **and re-reads the account** — proving the zero was persisted rather than echoed back.
+- The positive overdraft floor asserts `400` on **both** writers, each with a follow-up read proving the refusal wrote nothing.
+- The username collision asserts `409`, that no duplicate exists, **and that sign-in still returns `200`** — the defect's harm was a lockout, and a test asserting only the status would pass against a future regression that answered `409` and corrupted the data anyway.
+
+Three things are deliberately **not** covered, recorded so the absences read as decisions: **CORS preflight**, browser-enforced and ignored by newman, so a passing test would assert nothing; **concurrency**, since Postman runs sequentially; and **anything requiring identity** — a test that passes today would misrepresent the [disclosed authorisation gap](#security--what-is-and-is-not-enforced) as covered.
+
+> **Run a suite you have not run lately against a disposable database first.** The previous version of this collection was written for an older contract, and when it was finally run it did not merely fail — **it renamed the seeded administrator**, after which nobody could sign in. The bodies it sent were still valid; they were aimed at records that had changed underneath them. `docker compose down -v && docker compose up -d` is a one-command reset for exactly this. **For any artifact containing a write, "does it still pass?" and "what does it do while failing?" are different questions, and only the first usually gets asked.**
 
 ## Architecture
 

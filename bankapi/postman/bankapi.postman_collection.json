@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Bank API - Phase 2",
-    "description": "Customer CRUD against the Spring Boot API backed by MongoDB Atlas. Run the folders in order: the happy path creates customer 4 and deletes it again, so the collection is repeatable.",
+    "name": "Bank API",
+    "description": "Customers, accounts and sign-in against the Spring Boot API. Nine folders, run in order.\n\nREPEATABLE BY CONSTRUCTION: every folder deletes whatever it creates and never changes a seeded record to a different value, so the collection can be run twice in a row and leaves the database exactly as it found it. Baseline it expects: customer 3 (carol), customer 4 (admin, the only ADMIN), and accounts 101, 102, 103. All money is moved on accounts the collection creates and then deletes, so no seeded balance is ever touched.\n\nASSERTS BODIES, NOT ONLY STATUS. Several of the guarantees here - a balance that cannot be set by a client, a role that cannot be smuggled in, a password that survives an edit - return an ordinary 200 or 201 whether they hold or not. A status-only suite cannot see any of them, which is exactly how the defects in folders 6 and 9 reached production.\n\nWas 'Bank API - Phase 2' and covered customers only. Renamed because the customer-only scope was the thing being corrected.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -9,18 +9,72 @@
       "key": "baseUrl",
       "value": "http://localhost:8080/api/v1",
       "type": "string"
+    },
+    {
+      "key": "signInUsername",
+      "value": "carol",
+      "type": "string"
+    },
+    {
+      "key": "signInPassword",
+      "value": "carol123",
+      "type": "string"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "admin123",
+      "type": "string"
+    },
+    {
+      "key": "newCustomerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "smuggleCustomerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "renameCustomerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "seededBalance101",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "wrongPasswordBody",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
       "name": "1 - happy path",
+      "description": "Full customer lifecycle. Creates a customer, edits it and deletes it again, so the folder leaves the database exactly as it found it. The server assigns the id, so it is captured from the create response rather than hardcoded - an earlier version of this collection sent its own id, which the API no longer accepts.",
       "item": [
         {
           "name": "GET all customers",
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
           },
           "event": [
             {
@@ -30,7 +84,13 @@
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
                   "pm.test('returns a JSON array', () => pm.expect(pm.response.json()).to.be.an('array'));",
-                  "pm.test('seeded customers are present', () => pm.expect(pm.response.json().length).to.be.at.least(3));"
+                  "pm.test('seeded customers are present', () => pm.expect(pm.response.json().length).to.be.at.least(3));",
+                  "pm.test('no password is ever returned in a list', () => {",
+                  "    pm.response.json().forEach(c => pm.expect(c).to.not.have.property('password'));",
+                  "});",
+                  "pm.test('every customer carries a role', () => {",
+                  "    pm.response.json().forEach(c => pm.expect(['ADMIN', 'CUSTOMER']).to.include(c.role));",
+                  "});"
                 ]
               }
             }
@@ -41,7 +101,16 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/2", "host": ["{{baseUrl}}"], "path": ["customers", "2"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3"
+              ]
+            }
           },
           "event": [
             {
@@ -50,7 +119,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('body id matches the path', () => pm.expect(pm.response.json().id).to.eql(2));"
+                  "const c = pm.response.json();",
+                  "pm.test('body id matches the path', () => pm.expect(c.id).to.eql(3));",
+                  "pm.test('the seeded customer is the one returned', () => pm.expect(c.username).to.eql('carol'));",
+                  "pm.test('accountIds is a list, never null', () => pm.expect(c.accountIds).to.be.an('array'));"
                 ]
               }
             }
@@ -60,12 +132,26 @@
           "name": "POST create customer",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": 4,\n  \"username\": \"nina\",\n  \"fullName\": \"Nina Cortez\"\n}"
+              "raw": "{\n  \"username\": \"pmnina\",\n  \"password\": \"pmnina123\",\n  \"fullName\": \"Nina Cortez\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "CreateCustomerRequest(username, password, fullName). There is no field for an id or a role - the server assigns both."
           },
           "event": [
             {
@@ -74,10 +160,18 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const c = pm.response.json();",
+                  "pm.collectionVariables.set('newCustomerId', c.id);",
                   "pm.test('Location header points at the new resource', () => {",
-                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/customers/4');",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/customers/' + c.id);",
                   "});",
-                  "pm.test('echoes the created customer', () => pm.expect(pm.response.json().username).to.eql('nina'));"
+                  "pm.test('echoes the created customer', () => pm.expect(c.username).to.eql('pmnina'));",
+                  "pm.test('the SERVER assigned the id - the body could not', () => {",
+                  "    pm.expect(c.id).to.be.a('number').and.to.be.above(0);",
+                  "});",
+                  "pm.test('role is forced to CUSTOMER', () => pm.expect(c.role).to.eql('CUSTOMER'));",
+                  "pm.test('password is never returned', () => pm.expect(c).to.not.have.property('password'));",
+                  "pm.test('a new customer owns no accounts', () => pm.expect(c.accountIds).to.eql([]));"
                 ]
               }
             }
@@ -88,7 +182,16 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{newCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{newCustomerId}}"
+              ]
+            }
           },
           "event": [
             {
@@ -97,7 +200,49 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('persisted correctly', () => pm.expect(pm.response.json().fullName).to.eql('Nina Cortez'));"
+                  "const c = pm.response.json();",
+                  "pm.test('persisted correctly', () => pm.expect(c.fullName).to.eql('Nina Cortez'));",
+                  "pm.test('persisted as a CUSTOMER', () => pm.expect(c.role).to.eql('CUSTOMER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in as the created customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pmnina\",\n  \"password\": \"pmnina123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "Proves the create actually stored the password, which no GET can show - the field is write-only and never appears in a response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - the password was stored as sent', () => pm.response.to.have.status(200));",
+                  "pm.test('returns the customer who signed in', () => pm.expect(pm.response.json().username).to.eql('pmnina'));",
+                  "pm.test('password is never returned', () => pm.expect(pm.response.json()).to.not.have.property('password'));"
                 ]
               }
             }
@@ -107,12 +252,27 @@
           "name": "PUT replace customer",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": 4,\n  \"username\": \"nina\",\n  \"fullName\": \"Nina C. Ortez\"\n}"
+              "raw": "{\n  \"username\": \"pmnina\",\n  \"fullName\": \"Nina C. Ortez\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{newCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{newCustomerId}}"
+              ]
+            },
+            "description": "UpdateCustomerRequest(username, fullName). No id in the body - the path is the only identity, so there is no mismatch case to test."
           },
           "event": [
             {
@@ -121,8 +281,49 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('field was replaced', () => pm.expect(pm.response.json().fullName).to.eql('Nina C. Ortez'));",
-                  "pm.test('id is unchanged', () => pm.expect(pm.response.json().id).to.eql(4));"
+                  "const c = pm.response.json();",
+                  "pm.test('field was replaced', () => pm.expect(c.fullName).to.eql('Nina C. Ortez'));",
+                  "pm.test('id is unchanged', () => pm.expect(String(c.id)).to.eql(String(pm.collectionVariables.get('newCustomerId'))));",
+                  "pm.test('role survives an edit', () => pm.expect(c.role).to.eql('CUSTOMER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in after the edit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pmnina\",\n  \"password\": \"pmnina123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "PUT carries no password field, so it must leave the stored one alone. This is the only way to observe that from outside the API."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - an edit does not destroy the password', () => pm.response.to.have.status(200));",
+                  "pm.test('the edited name came back', () => pm.expect(pm.response.json().fullName).to.eql('Nina C. Ortez'));"
                 ]
               }
             }
@@ -133,7 +334,16 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{newCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{newCustomerId}}"
+              ]
+            }
           },
           "event": [
             {
@@ -153,14 +363,25 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/4", "host": ["{{baseUrl}}"], "path": ["customers", "4"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{newCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{newCustomerId}}"
+              ]
+            }
           },
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('404 Not Found', () => pm.response.to.have.status(404));"]
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
               }
             }
           ]
@@ -169,18 +390,34 @@
     },
     {
       "name": "2 - not found (404)",
+      "description": "Absence is a 404 on every verb. Id 99 is not seeded and nothing in this collection creates it.",
       "item": [
         {
           "name": "GET missing id",
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/99", "host": ["{{baseUrl}}"], "path": ["customers", "99"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/99",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "99"
+              ]
+            }
           },
           "event": [
             {
               "listen": "test",
-              "script": { "type": "text/javascript", "exec": ["pm.test('404', () => pm.response.to.have.status(404));"] }
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));",
+                  "pm.test('no body', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
             }
           ]
         },
@@ -189,12 +426,26 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/99", "host": ["{{baseUrl}}"], "path": ["customers", "99"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/99",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "99"
+              ]
+            }
           },
           "event": [
             {
               "listen": "test",
-              "script": { "type": "text/javascript", "exec": ["pm.test('404', () => pm.response.to.have.status(404));"] }
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
             }
           ]
         },
@@ -202,12 +453,26 @@
           "name": "PUT missing id",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": 99,\n  \"username\": \"ghost\",\n  \"fullName\": \"Ghost User\"\n}"
+              "raw": "{\n  \"username\": \"ghost\",\n  \"fullName\": \"Ghost User\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/customers/99", "host": ["{{baseUrl}}"], "path": ["customers", "99"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers/99",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "99"
+              ]
+            }
           },
           "event": [
             {
@@ -225,17 +490,32 @@
     },
     {
       "name": "3 - conflict (409)",
+      "description": "State-dependent refusals. Each would succeed against a different database, which is what separates a 409 from a 400. Both rules here hold for EVERY caller including curl, because they ask about the state of the system rather than about who is asking.",
       "item": [
         {
-          "name": "POST duplicate id",
+          "name": "POST duplicate username",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": 1,\n  \"username\": \"dupe\",\n  \"fullName\": \"Duplicate Id\"\n}"
+              "raw": "{\n  \"username\": \"carol\",\n  \"password\": \"irrelevant\",\n  \"fullName\": \"Duplicate Carol\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "The caller cannot pick an id, so the username is the only thing two creates can collide on. This request replaced a 'duplicate id' one, which is no longer expressible - CreateCustomerRequest has no id field."
           },
           "event": [
             {
@@ -243,7 +523,97 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('409, not 400 - the failure is state-dependent', () => pm.response.to.have.status(409));"
+                  "pm.test('409, not 400 - the failure is state-dependent', () => pm.response.to.have.status(409));",
+                  "pm.test('no body', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET customers is unchanged by the refused create",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('still exactly one carol', () => {",
+                  "    const carols = pm.response.json().filter(c => c.username === 'carol');",
+                  "    pm.expect(carols.length).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the last admin",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/4",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "4"
+              ]
+            },
+            "description": "The one protection in this application that is not cosmetic. 'At least one admin must remain' is an invariant about system state, so it needs no authentication and holds for curl exactly as it holds for the UI."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 - at least one admin must remain', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the admin, still there",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/4",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "4"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - the refusal deleted nothing', () => pm.response.to.have.status(200));",
+                  "pm.test('still an admin', () => pm.expect(pm.response.json().role).to.eql('ADMIN'));"
                 ]
               }
             }
@@ -252,20 +622,42 @@
       ]
     },
     {
-      "name": "4 - validation (400)",
+      "name": "4 - validation (400) and what cannot be smuggled",
+      "description": "Malformed requests, plus the structural guarantees: fields a client does not own cannot be set by sending them, because the request records have no component to bind them to. Those return 200/201 and IGNORE the extra fields - asserting the status alone would prove nothing, so each checks the stored values instead.",
       "item": [
         {
-          "name": "POST no id",
+          "name": "POST no password",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"username\": \"noid\",\n  \"fullName\": \"No Id\"\n}" },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"nopw\",\n  \"fullName\": \"No Password\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
           },
           "event": [
             {
               "listen": "test",
-              "script": { "type": "text/javascript", "exec": ["pm.test('400 - @NotNull on id', () => pm.response.to.have.status(400));"] }
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @NotBlank on password', () => pm.response.to.have.status(400));"
+                ]
+              }
             }
           ]
         },
@@ -273,14 +665,35 @@
           "name": "POST empty username",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"id\": 6,\n  \"username\": \"\",\n  \"fullName\": \"Six\"\n}" },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"\",\n  \"password\": \"x\",\n  \"fullName\": \"Six\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
           },
           "event": [
             {
               "listen": "test",
-              "script": { "type": "text/javascript", "exec": ["pm.test('400 - @NotBlank rejects empty', () => pm.response.to.have.status(400));"] }
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @NotBlank rejects empty', () => pm.response.to.have.status(400));"
+                ]
+              }
             }
           ]
         },
@@ -288,9 +701,25 @@
           "name": "POST whitespace fullName",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"id\": 6,\n  \"username\": \"six\",\n  \"fullName\": \"   \"\n}" },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"six\",\n  \"password\": \"x\",\n  \"fullName\": \"   \"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
           },
           "event": [
             {
@@ -305,27 +734,20 @@
           ]
         },
         {
-          "name": "POST id zero",
+          "name": "GET non-numeric id",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"id\": 0,\n  \"username\": \"six\",\n  \"fullName\": \"Six Sixon\"\n}" },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": { "type": "text/javascript", "exec": ["pm.test('400 - @Positive on id', () => pm.response.to.have.status(400));"] }
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "abc"
+              ]
             }
-          ]
-        },
-        {
-          "name": "PUT body id does not match path id",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"id\": 5,\n  \"username\": \"bob\",\n  \"fullName\": \"Bob Jones\"\n}" },
-            "url": { "raw": "{{baseUrl}}/customers/2", "host": ["{{baseUrl}}"], "path": ["customers", "2"] }
           },
           "event": [
             {
@@ -333,25 +755,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('400 - hand-rolled check, no annotation can see two inputs', () => pm.response.to.have.status(400));"
+                  "pm.test('400 - @PathVariable type conversion, free', () => pm.response.to.have.status(400));"
                 ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET non-numeric id",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": { "raw": "{{baseUrl}}/customers/abc", "host": ["{{baseUrl}}"], "path": ["customers", "abc"] }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": ["pm.test('400 - @PathVariable type conversion, free', () => pm.response.to.have.status(400));"]
               }
             }
           ]
@@ -360,9 +765,25 @@
           "name": "PUT on the collection (405)",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"id\": 1,\n  \"username\": \"x\",\n  \"fullName\": \"Y Z\"\n}" },
-            "url": { "raw": "{{baseUrl}}/customers", "host": ["{{baseUrl}}"], "path": ["customers"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"x\",\n  \"fullName\": \"Y Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
           },
           "event": [
             {
@@ -371,6 +792,2328 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('405 - routing table keys on verb + path', () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST with id and role smuggled into the body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pmsmuggle\",\n  \"password\": \"pw\",\n  \"fullName\": \"Smuggle Test\",\n  \"id\": 99,\n  \"role\": \"ADMIN\",\n  \"accountIds\": [\n    101\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "No caller can set a role anywhere in this API. Not a check that strips it - CreateCustomerRequest has no role component, so there is nowhere for one to arrive."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 - the extra fields bind to nothing and are ignored', () => pm.response.to.have.status(201));",
+                  "const c = pm.response.json();",
+                  "pm.collectionVariables.set('smuggleCustomerId', c.id);",
+                  "pm.test('the smuggled role did NOT take effect', () => pm.expect(c.role).to.eql('CUSTOMER'));",
+                  "pm.test('the smuggled id did NOT take effect', () => pm.expect(c.id).to.not.eql(99));",
+                  "pm.test('password still never returned', () => pm.expect(c).to.not.have.property('password'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the smuggle-test customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{smuggleCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{smuggleCustomerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 - folder cleans up after itself', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT with id, role and password smuggled",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"carol\",\n  \"fullName\": \"Carol Johnson\",\n  \"id\": 99,\n  \"role\": \"ADMIN\",\n  \"password\": \"hacked\",\n  \"accountIds\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3"
+              ]
+            },
+            "description": "Sends carol's OWN username and fullName, so the request is a no-op on the fields it is allowed to change and the folder leaves her exactly as found. Everything else in the body is ignored."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - the extra fields bind to nothing', () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json();",
+                  "pm.test('id still the path id', () => pm.expect(c.id).to.eql(3));",
+                  "pm.test('role NOT promoted to ADMIN', () => pm.expect(c.role).to.eql('CUSTOMER'));",
+                  "pm.test('accountIds NOT overwritten by the echoed list', () => pm.expect(c.accountIds).to.eql([103]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in as carol, password not overwritten",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{signInUsername}}\",\n  \"password\": \"{{signInPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "The proof that the smuggled password above changed nothing. Without this the previous request could pass while having quietly destroyed the credential."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - the smuggled password did not take effect', () => pm.response.to.have.status(200));",
+                  "pm.test('still the same customer', () => {",
+                  "    pm.expect(pm.response.json().username).to.eql(pm.collectionVariables.get('signInUsername'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 - accounts: read",
+      "description": "Read-only. Records the seeded balances into collection variables so that folder 7 can prove its negative tests moved no money.",
+      "item": [
+        {
+          "name": "GET all accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const accounts = pm.response.json();",
+                  "pm.test('returns a JSON array', () => pm.expect(accounts).to.be.an('array'));",
+                  "pm.test('seeded accounts are present', () => pm.expect(accounts.length).to.be.at.least(3));",
+                  "pm.test('every account carries the full shape', () => {",
+                  "    accounts.forEach(a => {",
+                  "        pm.expect(a).to.have.property('id');",
+                  "        pm.expect(a).to.have.property('balance');",
+                  "        pm.expect(['SAVINGS', 'CHECKING']).to.include(a.type);",
+                  "    });",
+                  "});",
+                  "pm.test('a savings account never has an overdraft', () => {",
+                  "    accounts.filter(a => a.type === 'SAVINGS')",
+                  "            .forEach(a => pm.expect(a.overdraftLimit).to.eql(0));",
+                  "});",
+                  "pm.test('no overdraft limit is positive - a floor is never above zero', () => {",
+                  "    accounts.forEach(a => pm.expect(a.overdraftLimit).to.be.at.most(0));",
+                  "});",
+                  "const seeded = accounts.find(a => a.id === 101);",
+                  "if (seeded) { pm.collectionVariables.set('seededBalance101', seeded.balance); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET account by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "101"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('body id matches the path', () => pm.expect(a.id).to.eql(101));",
+                  "pm.test('type is the enum constant, not a string of the class name', () => pm.expect(a.type).to.eql('SAVINGS'));",
+                  "pm.test('balance is a number', () => pm.expect(a.balance).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET missing account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));",
+                  "pm.test('no body', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET non-numeric account id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "abc"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @PathVariable type conversion', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET a customer's accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const accounts = pm.response.json();",
+                  "pm.test('returns a JSON array', () => pm.expect(accounts).to.be.an('array'));",
+                  "pm.test('resolves the ids on the customer into whole accounts', () => {",
+                  "    pm.expect(accounts.map(a => a.id)).to.include(103);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET accounts for a customer with none",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/4/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "4",
+                "accounts"
+              ]
+            },
+            "description": "A customer with no accounts and an absent customer are different answers, and the status codes keep them apart. The next request is the other half."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, not 404 - the customer exists and owns nothing', () => pm.response.to.have.status(200));",
+                  "pm.test('empty list', () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET accounts for a missing customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/99/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "99",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 - absent customer, not an empty list', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6 - accounts: lifecycle and money",
+      "description": "The account vertical end to end, including every route that moves money. All balances are moved on accounts this folder creates and then deletes, so no seeded balance is ever touched and the folder is repeatable. It opens by deleting its own test ids, so a run that aborted half way does not poison the next one.",
+      "item": [
+        {
+          "name": "Pre-clean: DELETE test account 901",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 or 404 - either way 901 is now free', () => {",
+                  "    pm.expect([204, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pre-clean: DELETE test account 902",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/902",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "902"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 or 404 - either way 902 is now free', () => {",
+                  "    pm.expect([204, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST open an account, with a balance smuggled into the body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 901,\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0,\n  \"balance\": 1000000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts?customerId=3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ],
+              "query": [
+                {
+                  "key": "customerId",
+                  "value": "3"
+                }
+              ]
+            },
+            "description": "REGRESSION TEST. This exact request used to return 201 with the balance the caller asked for - an unlimited money-creation primitive that bypassed deposit entirely. CreateAccountRequest has no balance component, so the field now binds to nothing. Asserting the 201 alone would have passed against the broken build; the assertion that matters is the balance."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const a = pm.response.json();",
+                  "pm.test('Location header points at the new resource', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/accounts/901');",
+                  "});",
+                  "pm.test('THE ACCOUNT OPENED AT ZERO - the smuggled balance bound to nothing', () => {",
+                  "    pm.expect(a.balance).to.eql(0);",
+                  "});",
+                  "pm.test('type is what was asked for', () => pm.expect(a.type).to.eql('SAVINGS'));",
+                  "pm.test('savings has no overdraft', () => pm.expect(a.overdraftLimit).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the new account - zero was PERSISTED, not just echoed",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            },
+            "description": "The create response could in principle be right while storage was wrong. This is the assertion that closes that gap."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('stored balance is zero', () => pm.expect(pm.response.json().balance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the owner's accounts - the link was made",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('the new account is linked to its owner', () => {",
+                  "    pm.expect(pm.response.json().map(a => a.id)).to.include(901);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST deposit",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901/deposit?amount=500",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901",
+                "deposit"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "500"
+                }
+              ]
+            },
+            "description": "The guarded path. This is the only way money enters an account."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('balance went up by the amount deposited', () => pm.expect(pm.response.json().balance).to.eql(500));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT replace the account, with id and balance smuggled",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"CHECKING\",\n  \"overdraftLimit\": -50,\n  \"id\": 999,\n  \"balance\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            },
+            "description": "REGRESSION TEST. PUT used to write the body's balance straight to storage - the same money-creation primitive as the create route, and closing only one of them would have fixed half the bug. UpdateAccountRequest carries neither a balance nor an id, so the replace can change the type and the floor and nothing else."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('THE BALANCE SURVIVED THE REPLACE', () => pm.expect(a.balance).to.eql(500));",
+                  "pm.test('the owned fields were replaced', () => pm.expect(a.type).to.eql('CHECKING'));",
+                  "pm.test('the floor was replaced', () => pm.expect(a.overdraftLimit).to.eql(-50));",
+                  "pm.test('keyed by the path id, not the body id', () => pm.expect(a.id).to.eql(901));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the account - the replace persisted correctly",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('stored balance still 500', () => pm.expect(a.balance).to.eql(500));",
+                  "pm.test('stored type is the replaced one', () => pm.expect(a.type).to.eql('CHECKING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST withdraw",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901/withdraw?amount=200",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901",
+                "withdraw"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "200"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('balance went down by the amount withdrawn', () => pm.expect(pm.response.json().balance).to.eql(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST withdraw past the overdraft floor",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901/withdraw?amount=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901",
+                "withdraw"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "1000"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409, not 400 - the same request succeeds at a higher balance', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the account - the refusal moved nothing",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            },
+            "description": "A refusal must leave nothing written. The 409 alone does not prove that."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('balance unchanged by the refused withdrawal', () => pm.expect(pm.response.json().balance).to.eql(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST withdraw exactly to the floor",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901/withdraw?amount=350",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901",
+                "withdraw"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "350"
+                }
+              ]
+            },
+            "description": "The boundary. balance - amt < overdraftLimit refuses, so landing exactly ON the floor is allowed and one unit further is not - which the next request checks."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - the floor is inclusive', () => pm.response.to.have.status(200));",
+                  "pm.test('balance is exactly the overdraft limit', () => pm.expect(pm.response.json().balance).to.eql(-50));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST withdraw one past the floor",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901/withdraw?amount=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901",
+                "withdraw"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 - one unit past the floor is refused', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST open an account through the customer-scoped route",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 902,\n  \"type\": \"CHECKING\",\n  \"overdraftLimit\": -100\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            },
+            "description": "The same operation as POST /accounts?customerId=, addressed the other way. The unscoped route delegates to this handler, so both bind the same record."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const a = pm.response.json();",
+                  "pm.test('opened at zero here too', () => pm.expect(a.balance).to.eql(0));",
+                  "pm.test('a checking account keeps the floor it asked for', () => pm.expect(a.overdraftLimit).to.eql(-100));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE an account through a customer who does not own it",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/4/accounts/902",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "4",
+                "accounts",
+                "902"
+              ]
+            },
+            "description": "Ownership between a customer and an account IS enforced, and needs no identity to check - it is a fact about stored data. Not to be confused with the absent check on WHO is making the request, which is Phase 10."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 - an account is only closable through its owner', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the account - the refused close deleted nothing",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/902",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "902"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - still there', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the account through its owner",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts/902",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts",
+                "902"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));",
+                  "pm.test('body is empty', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the closed account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/902",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "902"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the first account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the deleted account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "901"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the owner's accounts - unlinked and back to baseline",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            },
+            "description": "Deleting an account also drops its id from whichever customer listed it. This is also the folder's own proof that it left the database as it found it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().map(a => a.id);",
+                  "pm.test('the deleted account was unlinked from its owner', () => pm.expect(ids).to.not.include(901));",
+                  "pm.test('the closed account was unlinked too', () => pm.expect(ids).to.not.include(902));",
+                  "pm.test('the seeded account is untouched', () => pm.expect(ids).to.eql([103]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7 - accounts: validation (400), conflict (409) and absence (404)",
+      "description": "Every way an account request is refused. The folder ends by re-reading the seeded accounts to prove that none of these refusals moved any money.",
+      "item": [
+        {
+          "name": "POST positive overdraft limit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 903,\n  \"type\": \"CHECKING\",\n  \"overdraftLimit\": 50\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            },
+            "description": "REGRESSION TEST. The second half of the reported defect: an overdraft LIMIT is a floor, so a positive one sits above zero. @NegativeOrZero on the request record refuses it at the boundary."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - a floor above zero would refuse ordinary withdrawals', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT positive overdraft limit",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 50\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "101"
+              ]
+            },
+            "description": "REGRESSION TEST. The create route and the replace route bind different records, so the rule has to be stated on both. Targets a seeded account deliberately - a 400 means nothing was written to it, which the last request in this folder checks."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - the same rule on the replace route', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST fractional overdraft limit is accepted",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 904,\n  \"type\": \"CHECKING\",\n  \"overdraftLimit\": -100.5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            },
+            "description": "Documents a deliberate boundary rather than asserting a bug. The whole-number rule governs AMOUNTS, which is what keeps a balance exactly representable; a fractional floor cannot make a balance fractional, so it is not refused. If this ever becomes unwanted, this test is where the decision is recorded."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the floor is not required to be whole', () => {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.test('stored as sent', () => pm.expect(pm.response.json().overdraftLimit).to.eql(-100.5));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the fractional-floor account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/904",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "904"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 or 404 - folder cleans up after itself', () => {",
+                  "    pm.expect([204, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST no id",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @NotNull on id, the client supplies it', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST id zero",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 0,\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @Positive on id', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST no type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 903,\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @NotNull on type', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST unknown type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 903,\n  \"type\": \"CRYPTO\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - the enum has two constants and this is not one', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST without customerId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 903,\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "?customerId= is required on the unscoped create. An ownerless account would appear in no customer's accountIds and be reachable only by listing every account, so it is made unrepresentable rather than merely discouraged."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - an account owned by nobody is not representable', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST an id that is already taken",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 101,\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/3/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "3",
+                "accounts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 - the unique _id index rejected the insert', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST for a customer who does not exist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 903,\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/99/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "99",
+                "accounts"
+              ]
+            },
+            "description": "Order matters and is deliberate: the customer is established first, so the two failures do not collapse into one status code."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404, not 409 - a create against a missing customer is not a conflict', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST deposit a fractional amount",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/101/deposit?amount=10.50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "101",
+                "deposit"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "10.50"
+                }
+              ]
+            },
+            "description": "Money is a double restricted to whole numbers. A double holds every integer exactly, so excluding fractions removes the floating-point problem rather than tolerating it - which is what makes the type choice sound."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400, not 409 - no balance would ever make it succeed', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST deposit zero",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/101/deposit?amount=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "101",
+                "deposit"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - the amount must be above zero', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST withdraw a negative amount",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/101/withdraw?amount=-50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "101",
+                "withdraw"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "-50"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - a negative withdrawal is a deposit by another name', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST deposit to a missing account",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/999/deposit?amount=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "999",
+                "deposit"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST withdraw from a missing account",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/999/withdraw?amount=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "999",
+                "withdraw"
+              ],
+              "query": [
+                {
+                  "key": "amount",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT a missing account",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SAVINGS\",\n  \"overdraftLimit\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 - PUT does not create', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE a missing account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the seeded account - no refusal moved any money",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "101"
+              ]
+            },
+            "description": "Several requests in this folder were aimed at account 101 on purpose. A 400 or a 409 that still wrote something would pass every status assertion above and be caught only here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('balance is exactly what folder 5 recorded', () => {",
+                  "    pm.expect(a.balance).to.eql(Number(pm.collectionVariables.get('seededBalance101')));",
+                  "});",
+                  "pm.test('the refused PUT did not change the type', () => pm.expect(a.type).to.eql('SAVINGS'));",
+                  "pm.test('the refused PUT did not raise the floor', () => pm.expect(a.overdraftLimit).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8 - sign in",
+      "description": "POST /customers/signin compares a username and password and returns that customer. It is NOT authentication: no session is created and no token is issued, so the next request is as anonymous as this one and every other endpoint is reachable without signing in at all.",
+      "item": [
+        {
+          "name": "POST sign in as a customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{signInUsername}}\",\n  \"password\": \"{{signInPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "Credentials come from collection variables so the collection can be pointed at another database without editing requests. They are not secret - these are the seed credentials and they are already in committed source, in plaintext, which is a known and deliberate Phase 10 deferral rather than an oversight."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json();",
+                  "pm.test('returns the customer who signed in', () => {",
+                  "    pm.expect(c.username).to.eql(pm.collectionVariables.get('signInUsername'));",
+                  "});",
+                  "pm.test('reports the role, so a client can route on it', () => pm.expect(c.role).to.eql('CUSTOMER'));",
+                  "pm.test('THE PASSWORD IS NEVER RETURNED', () => pm.expect(c).to.not.have.property('password'));",
+                  "pm.test('no session cookie is issued - nothing persists', () => {",
+                  "    pm.expect(pm.response.headers.get('Set-Cookie')).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in as the admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "The role is DATA, not a permission. Nothing in the API behaves differently because of it - the admin-only surfaces are a front-end product boundary that curl walks straight past."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('reports ADMIN', () => pm.expect(pm.response.json().role).to.eql('ADMIN'));",
+                  "pm.test('password never returned', () => pm.expect(pm.response.json()).to.not.have.property('password'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in with the wrong password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{signInUsername}}\",\n  \"password\": \"definitely-not-the-password\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "pm.test('empty body - nothing is disclosed', () => pm.expect(pm.response.text()).to.be.empty);",
+                  "pm.collectionVariables.set('wrongPasswordBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in with an unknown username",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"no-such-user-anywhere\",\n  \"password\": \"whatever\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "A wrong password and an unknown username must be indistinguishable. Separating them would let a caller try a list of names and keep the ones that say 'wrong password', producing an account inventory before guessing a single credential."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "pm.test('NO USERNAME ORACLE - identical to a wrong password', () => {",
+                  "    pm.expect(pm.response.text()).to.eql(pm.collectionVariables.get('wrongPasswordBody'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in with no password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{signInUsername}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 - @NotBlank, rejected before any comparison', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in with a blank username",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"   \",\n  \"password\": \"x\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9 - regression: username uniqueness on rename",
+      "description": "A rename could put a second customer onto an existing username. findByUsername returns a single Optional, so two matches make it throw and sign-in answers 500 - for the ORIGINAL user as much as the impostor. Any anonymous caller could lock a real user out permanently without touching that user's record. Uniqueness was enforced on create and nowhere else.",
+      "item": [
+        {
+          "name": "POST create the customer to rename",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pmrename\",\n  \"password\": \"pmrename123\",\n  \"fullName\": \"Rename Test\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('renameCustomerId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT rename onto another customer's username",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{signInUsername}}\",\n  \"fullName\": \"Impostor\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{renameCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{renameCustomerId}}"
+              ]
+            },
+            "description": "REGRESSION TEST. This returned 200 before the fix, and the damage was permanent."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 - that username belongs to someone else', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET customers - still exactly one holder of the username",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const target = pm.collectionVariables.get('signInUsername');",
+                  "pm.test('the refused rename created no duplicate', () => {",
+                  "    pm.expect(pm.response.json().filter(c => c.username === target).length).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sign in as the victim - still works",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{signInUsername}}\",\n  \"password\": \"{{signInPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "signin"
+              ]
+            },
+            "description": "The actual impact of the bug, asserted directly. With two customers sharing a username this endpoint answered 500 for both of them, so a passing 200 here is what proves the lockout is gone."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, not 500 - the duplicate that would break this was refused', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT keeping the customer's OWN username",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pmrename\",\n  \"fullName\": \"Rename Test II\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{renameCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{renameCustomerId}}"
+              ]
+            },
+            "description": "THE OTHER HALF, and it is why the check asks whether ANOTHER customer holds the name rather than whether anyone does. A naive isPresent() would 409 every edit that did not also rename - which is most of them - and a suite that omitted this case would let that regression through."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - keeping your own username is not a conflict', () => pm.response.to.have.status(200));",
+                  "pm.test('the change that was asked for was applied', () => {",
+                  "    pm.expect(pm.response.json().fullName).to.eql('Rename Test II');",
+                  "});",
+                  "pm.test('username unchanged', () => pm.expect(pm.response.json().username).to.eql('pmrename'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT renaming to a genuinely free username",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pmrenamed\",\n  \"fullName\": \"Rename Test II\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{renameCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{renameCustomerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - a real rename still works', () => pm.response.to.have.status(200));",
+                  "pm.test('the new username took effect', () => pm.expect(pm.response.json().username).to.eql('pmrenamed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the rename-test customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{renameCustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{renameCustomerId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 - folder cleans up after itself', () => pm.response.to.have.status(204));"
                 ]
               }
             }
